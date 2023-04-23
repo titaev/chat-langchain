@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>WebSocket Streaming Test</title>
+  </head>
+  <body>
+   <button id="send-btn">Send Message</button>
+    <ul id="messages"></ul>
+    <script>
+      const messagesEl = document.getElementById('messages');
+      const socket = new WebSocket('ws://localhost:9000/chat/lead_form/1234');
+
+      socket.addEventListener('open', (event) => {
+        console.log('WebSocket connection established');
+      });
+
+      socket.addEventListener('message', (event) => {
+        const data = event.data;
+          console.log(data)
+        if (data.type === 'stream') {
+          const message = data.text;
+          const li = document.createElement('li');
+          li.textContent = message;
+          messagesEl.appendChild(li);
+        } else if (data.type === 'result') {
+          console.log('Received final result:', data.text);
+        }
+      });
+
+      const sendBtn = document.getElementById('send-btn');
+
+      sendBtn.addEventListener('click', (event) => {
+        const message = 'Hello, WebSocket!';
+        socket.send(JSON.stringify({ text: message }));
+      });
+    </script>
+  </body>
+</html>
+
+
+
+
+

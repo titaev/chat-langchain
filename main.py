@@ -2,9 +2,11 @@
 import logging
 import pickle
 import json
+import httpx
 from operator import itemgetter
 from pathlib import Path
 from typing import Optional
+import openai
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.templating import Jinja2Templates
@@ -12,18 +14,36 @@ from fastapi.responses import PlainTextResponse
 from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from fastapi.staticfiles import StaticFiles
 from langchain.vectorstores import VectorStore
+from websockets.exceptions import ConnectionClosedError
 
 from callback import QuestionGenCallbackHandler, StreamingLLMCallbackHandler
 from query_data import get_chain
 from schemas import ChatResponse
 from usersData import getUsersData
+from aii_admin_service import AiiAdminApi
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 vectorstore: Optional[VectorStore] = None
+httpx_session: httpx.AsyncClient
+aii_admin_api: AiiAdminApi
 
 # app.add_middleware(HTTPSRedirectMiddleware)
 # app.mount("/.well-known/pki-validation", StaticFiles(directory="./.well-known/pki-validation"), name="static")
+
+
+@app.on_event("startup")
+async def startup():
+    global httpx_session
+    httpx_session = httpx.AsyncClient()
+    global aii_admin_api
+    aii_admin_api = AiiAdminApi(httpx_session)
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    global httpx_session
+    await httpx_session.aclose()
 
 
 @app.get("/")
@@ -88,6 +108,38 @@ async def websocket_endpoint(websocket: WebSocket):
                 type="error",
             )
             await websocket.send_json(resp.dict())
+
+
+@app.websocket("/chat/lead_form/{form_id}")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    try:
+
+        while True:
+            data = await websocket.receive_text()
+            user_input = json.loads(data)["text"]
+
+            # Call GPT-3.5 API
+            openai.api_key = ''
+            response = await openai.ChatCompletion.acreate(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": user_input}],
+                max_tokens=1024,
+                n=1,
+                stop=None,
+                temperature=0.7,
+                stream=True
+            )
+
+            # Extract the text from the response
+            async for response_chunk in response:
+                delta = response_chunk.choices[0].delta
+                content = getattr(delta, "content", None)
+                if content:
+                    await websocket.send_text(content)
+
+    except ConnectionClosedError:
+        await websocket.close()
 
 
 if __name__ == "__main__":
