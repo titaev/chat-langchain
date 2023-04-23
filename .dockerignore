@@ -1,0 +1,8 @@
+venv
+.idea
+Dockerfile
+systemd
+nginx
+tests
+.env
+log

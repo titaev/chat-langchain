@@ -13,3 +13,4 @@ unstructured
 libmagic
 httpx
 pydantic[dotenv]
+gunicorn

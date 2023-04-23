@@ -48,12 +48,12 @@ async def shutdown():
 
 @app.get("/")
 async def get(request: Request):
-         return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse("index.html", {"request": request})
 
 
 @app.get("/", response_class=PlainTextResponse)
 async def get():
-        return "Hello World"
+    return "Hello World"
 
 
 @app.websocket("/chat")
@@ -111,16 +111,20 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 @app.websocket("/chat/lead_form/{form_id}")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket, form_id):
     await websocket.accept()
     try:
+        api_key = await aii_admin_api.get_openai_key_by_leadform_id(form_id)
+        if not api_key:
+            raise ConnectionClosedError
 
         while True:
             data = await websocket.receive_text()
             user_input = json.loads(data)["text"]
 
             # Call GPT-3.5 API
-            openai.api_key = ''
+            openai.api_key = api_key
+
             response = await openai.ChatCompletion.acreate(
                 model="gpt-3.5-turbo",
                 messages=[{"role": "user", "content": user_input}],
