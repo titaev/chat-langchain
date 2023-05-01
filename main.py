@@ -18,7 +18,7 @@ from websockets.exceptions import ConnectionClosedError
 
 from callback import QuestionGenCallbackHandler, StreamingLLMCallbackHandler
 from query_data import get_chain
-from schemas import ChatResponse
+from schemas import ChatResponse, LeadFormChatResponse
 from usersData import getUsersData
 from aii_admin_service import AiiAdminApi
 
@@ -142,7 +142,65 @@ async def websocket_endpoint(websocket: WebSocket, form_id):
                 if content:
                     await websocket.send_text(content)
 
+            await websocket.send_text(json.dumps({'type': 'response_end'}))
+
     except ConnectionClosedError:
+        await websocket.close()
+
+
+@app.websocket("/chat/v2/lead_form/{form_id}")
+async def lead_form_chat_endpoint_v2(websocket: WebSocket, form_id):
+    await websocket.accept()
+    try:
+        api_key = await aii_admin_api.get_openai_key_by_leadform_id(form_id)
+        if not api_key:
+            resp = LeadFormChatResponse(
+                sender="bot",
+                message="User with this form doesn't have api_key in aii_admin",
+                type="error",
+            )
+            await websocket.send_json(resp.dict())
+            raise ConnectionClosedError
+
+        while True:
+            data = await websocket.receive_text()
+            user_input = json.loads(data)["text"]
+
+            # Call GPT-3.5 API
+            openai.api_key = api_key
+
+            response = await openai.ChatCompletion.acreate(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": user_input}],
+                max_tokens=1024,
+                n=1,
+                stop=None,
+                temperature=0.7,
+                stream=True
+            )
+
+            # Extract the text from the response
+            start_resp = LeadFormChatResponse(sender="bot", message="", type="start")
+            await websocket.send_json(start_resp.dict())
+            async for response_chunk in response:
+                delta = response_chunk.choices[0].delta
+                content = getattr(delta, "content", None)
+                if content:
+                    chat_resp = LeadFormChatResponse(
+                        sender="bot",
+                        message=content,
+                        type="stream",
+                    )
+                    await websocket.send_json(chat_resp.dict())
+
+            end_resp = LeadFormChatResponse(sender="bot", message="", type="end")
+            await websocket.send_json(end_resp.dict())
+
+    except ConnectionClosedError:
+        await websocket.close()
+    except openai.OpenAIError as error:
+        end_resp = LeadFormChatResponse(sender="bot", message=str(error), type="error")
+        await websocket.send_json(end_resp.dict())
         await websocket.close()
 
 
