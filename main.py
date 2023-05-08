@@ -131,7 +131,7 @@ async def websocket_endpoint(websocket: WebSocket, form_id):
                 max_tokens=1024,
                 n=1,
                 stop=None,
-                temperature=0.7,
+                temperature=0.4,
                 stream=True
             )
 
@@ -175,7 +175,7 @@ async def lead_form_chat_endpoint_v2(websocket: WebSocket, form_id):
                 max_tokens=1024,
                 n=1,
                 stop=None,
-                temperature=0.7,
+                temperature=0.4,
                 stream=True
             )
 
