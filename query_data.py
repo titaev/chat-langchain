@@ -21,11 +21,11 @@ def _get_chat_history(chat_history: List[Tuple[str, str]]) -> str:
 
 
 class MyChatVectorDBChain(ChatVectorDBChain):
-    custom_results: Optional[str] = None
+    custom_docs: List[Document] = None
 
-    def __init__(self, custom_results, **kwargs):
+    def __init__(self, custom_docs, **kwargs):
         super().__init__(**kwargs)  # вызываем конструктор родительского класса
-        self.custom_results = custom_results
+        self.custom_docs = custom_docs
 
     async def _acall(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         question = inputs["question"]
@@ -38,11 +38,8 @@ class MyChatVectorDBChain(ChatVectorDBChain):
         else:
             new_question = question
         # TODO: This blocks the event loop, but it's not clear how to avoid it.
-        if self.custom_results:
-            doc = Document(
-                page_content=self.custom_results
-            )
-            docs = [doc]
+        if self.custom_docs:
+            docs = self.custom_docs
         else:
             docs = self.vectorstore.similarity_search(
                 new_question, k=self.top_k_docs_for_context, **vectordbkwargs
@@ -58,7 +55,7 @@ class MyChatVectorDBChain(ChatVectorDBChain):
 
 
 def get_chain(
-    vectorstore: VectorStore, question_handler, stream_handler, condense_template, qa_prompt, tracing: bool = False, custom_results=None
+    vectorstore: VectorStore, question_handler, stream_handler, condense_template, qa_prompt, tracing: bool = False, custom_docs=None
 ) -> ChatVectorDBChain:
     """Create a ChatVectorDBChain for question/answering."""
     # Construct a ChatVectorDBChain with a streaming llm for combine docs
@@ -89,7 +86,7 @@ def get_chain(
     )
 
     qa = MyChatVectorDBChain(
-        custom_results,
+        custom_docs,
         vectorstore=vectorstore,
         combine_docs_chain=doc_chain,
         question_generator=question_generator,
