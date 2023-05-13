@@ -1,4 +1,5 @@
-from models.retrieval_plugin_query_models import Queries, ResultModel
+from typing import Optional
+from models.retrieval_plugin_query_models import Queries, QueryResult
 
 from config import config
 
@@ -14,8 +15,8 @@ class RetrievalPluginApi:
     def __init__(self, httpx_session):
         self._httpx_session = httpx_session
 
-    async def queries(self, queries: Queries) -> ResultModel:
+    async def query(self, queries: Queries) -> Optional[QueryResult]:
         url = f"{self._url}/query"
-        resp = await self._httpx_session.get(url, headers=self._headers, json=queries.dict())
-        resp_data = resp.json()
-        return ResultModel(**resp_data)
+        resp = await self._httpx_session.post(url, headers=self._headers, json=queries.dict())
+        resp_data = resp.json()['results']
+        return QueryResult(**resp_data[0]) if resp_data else None
