@@ -1,4 +1,7 @@
+from typing import Optional
+
 from config import config
+from models.aii_admin_models import ChatSettings
 
 
 class AiiAdminApi:
@@ -17,3 +20,8 @@ class AiiAdminApi:
         resp_data = resp.json()
         return resp_data['owner']['openai_key']
 
+    async def get_chat(self, chat_id) -> Optional[ChatSettings]:
+        url = f"{self._url}/api/v1/aii_chat_api/training/chat/{chat_id}"
+        resp = await self._httpx_session.get(url, headers=self._headers)
+        resp_data = resp.json()
+        return ChatSettings(**resp_data)

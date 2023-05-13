@@ -21,6 +21,7 @@ from services.aii_admin_service import AiiAdminApi
 from services.retrieval_plugin_service import RetrievalPluginApi
 from utils.vectorstore_utils import EmptyVectorStore
 from models.retrieval_plugin_query_models import QueryResult as RetrievalPluginResult, Queries as RetrievalPluginQueries
+from models.aii_admin_models import ChatSettings
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
@@ -60,21 +61,20 @@ async def get():
     return "Hello World"
 
 
-@app.websocket("/chat")
-async def pre_trained_chat(websocket: WebSocket):
+@app.websocket("/trained_chat/{chat_id}")
+async def pre_trained_chat(websocket: WebSocket, chat_id):
     await websocket.accept()
     question_handler = QuestionGenCallbackHandler(websocket)
     stream_handler = StreamingLLMCallbackHandler(websocket)
     chat_history = []
     users_data = getUsersData()
-
+    chat_settings: ChatSettings = await aii_admin_api.get_chat(chat_id)
     while True:
         try:
             # Receive and send back the client message
             request = await websocket.receive_text()
             question, clientId, persistHistory = itemgetter('question', 'clientId', 'persistHistory')(json.loads(request))
-            # question, clientId, persistHistory, aii_user_id, aii_chat_id = itemgetter('question', 'clientId', 'persistHistory', 'aii_user_id', 'aii_chat_id')(json.loads(request))
-            # user = users_data.get(clientId)
+
             # if not(user):
             #     resp = ChatResponse(
             #         sender="bot",
@@ -84,8 +84,6 @@ async def pre_trained_chat(websocket: WebSocket):
             #     await websocket.send_json(resp.dict())
             #     continue
 
-            condense_template = ''
-            template = ''
             clientVector = EmptyVectorStore()  # plug
             resp = ChatResponse(sender="you", message=question, type="stream")
             await websocket.send_json(resp.dict())
@@ -102,8 +100,7 @@ async def pre_trained_chat(websocket: WebSocket):
                 {
                   "query": question,
                   "filter": {
-                    # "author": f"{aii_user_id}_{aii_chat_id}",
-                      "author": clientId,
+                      "author": f"{chat_settings.owner}_{chat_id}",
                   },
                   "top_k": 3
                 }
@@ -115,7 +112,7 @@ async def pre_trained_chat(websocket: WebSocket):
 
             custom_docs = [Document(page_content=doc.text) for doc in query_result.results]
 
-            qa_chain = get_chain(clientVector, question_handler, stream_handler, condense_template, template, custom_docs=custom_docs)
+            qa_chain = get_chain(clientVector, question_handler, stream_handler, chat_settings.langchain_condense_template, chat_settings.langchain_template, custom_docs=custom_docs)
 
             result = await qa_chain.acall(
                {"question": question, "chat_history": lim_chat_history}
