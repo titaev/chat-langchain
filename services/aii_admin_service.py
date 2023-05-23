@@ -24,4 +24,5 @@ class AiiAdminApi:
         url = f"{self._url}/api/v1/aii_chat_api/training/chat/{chat_id}"
         resp = await self._httpx_session.get(url, headers=self._headers)
         resp_data = resp.json()
+        print(resp_data)
         return ChatSettings(**resp_data)

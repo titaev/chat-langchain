@@ -2,7 +2,7 @@ from pydantic import BaseModel, validator
 
 
 class ChatSettings(BaseModel):
-    id: int
+    id: str
     name: str
     status: str
     langchain_template: str

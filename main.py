@@ -62,12 +62,11 @@ async def get():
 
 
 @app.websocket("/trained_chat/{chat_id}")
-async def pre_trained_chat(websocket: WebSocket, chat_id):
+async def pre_trained_chat(websocket: WebSocket, chat_id: str):
     await websocket.accept()
     question_handler = QuestionGenCallbackHandler(websocket)
     stream_handler = StreamingLLMCallbackHandler(websocket)
     chat_history = []
-    users_data = getUsersData()
     chat_settings: ChatSettings = await aii_admin_api.get_chat(chat_id)
     while True:
         try:
@@ -100,7 +99,7 @@ async def pre_trained_chat(websocket: WebSocket, chat_id):
                 {
                   "query": question,
                   "filter": {
-                      "author": f"{chat_settings.owner}_{chat_id}",
+                      "author": f"chat_{chat_id}",
                   },
                   "top_k": 3
                 }
