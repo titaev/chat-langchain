@@ -61,6 +61,79 @@ async def get():
     return "Hello World"
 
 
+@app.websocket("/trained_chat/{chat_id}/search/")
+async def pre_trained_chat_search(websocket: WebSocket, chat_id: str):
+    await websocket.accept()
+    question_handler = QuestionGenCallbackHandler(websocket)
+    stream_handler = StreamingLLMCallbackHandler(websocket)
+    chat_history = []
+    chat_settings: ChatSettings = await aii_admin_api.get_chat(chat_id)
+    while True:
+        try:
+            # Receive and send back the client message
+            request = await websocket.receive_text()
+            search_query, ai_response_enabled = itemgetter('search_query', 'ai_response_enabled')(json.loads(request))
+
+            # if not(user):
+            #     resp = ChatResponse(
+            #         sender="bot",
+            #         message="Client with such id doesn't exist.",
+            #         type="error",
+            #     )
+            #     await websocket.send_json(resp.dict())
+            #     continue
+
+            clientVector = EmptyVectorStore()  # plug
+            resp = ChatResponse(sender="you", message=search_query, type="stream")
+            await websocket.send_json(resp.dict())
+
+            # Construct a response
+            start_resp = ChatResponse(sender="bot", message="", type="start")
+            await websocket.send_json(start_resp.dict())
+
+            # make query to retrieval plugin
+            queries = {
+              "queries": [
+                {
+                  "query": search_query,
+                  "filter": {
+                      "author": f"chat_{chat_id}",
+                  },
+                  "top_k": chat_settings.langchain_chat_doc_count
+                }
+              ]
+            }
+            query_result: RetrievalPluginResult = await retrieval_plugin_api.query(
+                queries=RetrievalPluginQueries(**queries)
+            )
+
+            custom_docs = [Document(page_content=doc.text) for doc in query_result.results]
+
+            if ai_response_enabled:
+                qa_chain = get_chain(clientVector, question_handler, stream_handler, chat_settings.langchain_condense_template, chat_settings.langchain_template, custom_docs=custom_docs)
+                result = await qa_chain.acall(
+                   {"question": search_query, "chat_history": []}
+                )
+                chat_history.append((result['question'], result["answer"]))
+
+            docs_resp = ChatResponse(sender="bot", message=json.dumps(query_result.dict(exclude={"query"})), type="docs")
+            await websocket.send_json(docs_resp.dict())
+
+            end_resp = ChatResponse(sender="bot", message="", type="end")
+            await websocket.send_json(end_resp.dict())
+        except WebSocketDisconnect:
+            logging.info("websocket disconnect")
+            break
+        except Exception as e:
+            logging.error(e, exc_info=True)
+            resp = ChatResponse(
+                sender="bot",
+                message=str(e),
+                type="error",
+            )
+            await websocket.send_json(resp.dict())
+
+
 @app.websocket("/trained_chat/{chat_id}")
 async def pre_trained_chat(websocket: WebSocket, chat_id: str):
     await websocket.accept()
@@ -72,7 +145,8 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
         try:
             # Receive and send back the client message
             request = await websocket.receive_text()
-            question, clientId, persistHistory = itemgetter('question', 'clientId', 'persistHistory')(json.loads(request))
+            messages = itemgetter('messages')(json.loads(request))
+            question = messages[-1]['content']
 
             # if not(user):
             #     resp = ChatResponse(
@@ -91,7 +165,7 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
             start_resp = ChatResponse(sender="bot", message="", type="start")
             await websocket.send_json(start_resp.dict())
 
-            lim_chat_history = chat_history[-5:] if persistHistory else []
+            lim_chat_history = chat_history[-5:] if messages else []
 
             # make query to retrieval plugin
             queries = {
@@ -101,7 +175,7 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
                   "filter": {
                       "author": f"chat_{chat_id}",
                   },
-                  "top_k": 3
+                  "top_k": chat_settings.langchain_chat_doc_count
                 }
               ]
             }
@@ -127,7 +201,7 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
             logging.error(e, exc_info=True)
             resp = ChatResponse(
                 sender="bot",
-                message="Sorry, something went wrong. Try again.",
+                message=str(e),
                 type="error",
             )
             await websocket.send_json(resp.dict())

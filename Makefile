@@ -1,5 +1,5 @@
 name=aii_admin_backend
-tag=chat_backend_test3
+tag=chat_backend_test4
 container_name=aii_chat_backend
 run:
 	docker run --network host --name $(container_name) -v /etc/aii/$(container_name).env:/app/.env -d  $(name):$(tag)
