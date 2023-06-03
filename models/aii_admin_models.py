@@ -5,6 +5,7 @@ class ChatSettings(BaseModel):
     id: str
     name: str
     model_name: str
+    open_ai_temperature: float
     langchain_template: str
     langchain_condense_template: str
     langchain_chat_doc_count: int

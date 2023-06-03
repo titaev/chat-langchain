@@ -82,7 +82,6 @@ async def pre_trained_chat_search(websocket: WebSocket, chat_id: str):
             req_data = json.loads(request)
             search_query = req_data.get('search_query', None)
             ai_response_enabled = req_data.get('ai_response_enabled', True)
-            temperature = req_data.get('temperature', 0)
 
             # if not(user):
             #     resp = ChatResponse(
@@ -124,7 +123,7 @@ async def pre_trained_chat_search(websocket: WebSocket, chat_id: str):
             if ai_response_enabled:
                 qa_chain = get_chain(clientVector, question_handler, stream_handler,
                                      chat_settings.langchain_condense_template, chat_settings.langchain_template,
-                                     custom_docs=custom_docs, temperature=temperature, model_name=chat_settings.model_name,
+                                     custom_docs=custom_docs, temperature=chat_settings.open_ai_temperature, model_name=chat_settings.model_name,
                                      top_k_docs_for_context=chat_settings.langchain_chat_doc_count)
                 result = await qa_chain.acall(
                    {"question": search_query, "chat_history": []}
@@ -159,7 +158,6 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
             request = await websocket.receive_text()
             req_data = json.loads(request)
             messages = req_data.get('messages', None)
-            temperature = req_data.get('temperature', 0)
             question = messages[-1]['content']
 
             # if not(user):
@@ -201,7 +199,7 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
 
             qa_chain = get_chain(clientVector, question_handler, stream_handler,
                                  chat_settings.langchain_condense_template, chat_settings.langchain_template,
-                                 custom_docs=custom_docs, temperature=temperature, model_name=chat_settings.model_name,
+                                 custom_docs=custom_docs, temperature=chat_settings.open_ai_temperature, model_name=chat_settings.model_name,
                                  top_k_docs_for_context=chat_settings.langchain_chat_doc_count)
 
             result = await qa_chain.acall(
