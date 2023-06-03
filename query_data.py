@@ -55,7 +55,9 @@ class MyChatVectorDBChain(ChatVectorDBChain):
 
 
 def get_chain(
-    vectorstore: VectorStore, question_handler, stream_handler, condense_template, qa_prompt, tracing: bool = False, custom_docs=None
+    vectorstore: VectorStore, question_handler, stream_handler,
+        condense_template, qa_prompt, tracing: bool = False, custom_docs=None,
+        temperature=0, model_name='gpt-3.5-turbo', top_k_docs_for_context=4
 ) -> ChatVectorDBChain:
     """Create a ChatVectorDBChain for question/answering."""
     # Construct a ChatVectorDBChain with a streaming llm for combine docs
@@ -71,11 +73,19 @@ def get_chain(
         stream_manager.add_handler(tracer)
 
     question_gen_llm = OpenAIChat(
-        temperature=0,
+        model_name=model_name,
+        temperature=temperature,
         verbose=True,
         callback_manager=question_manager,
     )
-    streaming_llm = OpenAIChat(streaming=True, callback_manager=stream_manager, verbose=True, temperature=0, max_tokens=675)
+    streaming_llm = OpenAIChat(
+        model_name=model_name,
+        streaming=True,
+        callback_manager=stream_manager,
+        verbose=True,
+        temperature=temperature,
+        max_tokens=675
+    )
     CONDENSE_QUESTION_PROMPT = PromptTemplate.from_template(condense_template)
     QA_PROMPT = PromptTemplate(template=qa_prompt, input_variables=["question", "context"])
     question_generator = LLMChain(
@@ -91,6 +101,6 @@ def get_chain(
         combine_docs_chain=doc_chain,
         question_generator=question_generator,
         callback_manager=manager,
-        top_k_docs_for_context=4,
+        top_k_docs_for_context=top_k_docs_for_context,
     )
     return qa

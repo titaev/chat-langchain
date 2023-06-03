@@ -21,5 +21,13 @@ COPY . .
 # Expose the port the application will run on
 EXPOSE 8000
 
+# Create user
+RUN groupadd -g 1601 aii_backend && \
+    useradd -m -u 1601 -g aii_backend aii_backend && \
+    chown -R aii_backend:aii_backend .
+
+
+USER aii_backend
+
 # Start the application using Gunicorn with Uvicorn worker
 CMD ["gunicorn", "-w", "1", "-k", "uvicorn.workers.UvicornWorker", "main:app", "--bind", "127.0.0.1:8002"]

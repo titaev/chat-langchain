@@ -15,6 +15,9 @@ class Config(BaseSettings):
     retrieval_plugin_url: str
     retrieval_plugin_secret_key: str
 
+    log_level: str = "DEBUG"
+    log_file: str = "chat-langchain.log"
+
     class Config:
         env_file = str(Path(BASE_DIR, '.env'))
         env_file_encoding = 'utf-8'

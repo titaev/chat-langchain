@@ -5,6 +5,8 @@ import httpx
 from operator import itemgetter
 from typing import Optional
 import openai
+import uuid
+import traceback
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.templating import Jinja2Templates
@@ -22,6 +24,7 @@ from services.retrieval_plugin_service import RetrievalPluginApi
 from utils.vectorstore_utils import EmptyVectorStore
 from models.retrieval_plugin_query_models import QueryResult as RetrievalPluginResult, Queries as RetrievalPluginQueries
 from models.aii_admin_models import ChatSettings
+from logger import logger
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
@@ -36,6 +39,10 @@ retrieval_plugin_api: RetrievalPluginApi
 
 @app.on_event("startup")
 async def startup():
+    logger.info("#################### AII ####################")
+    logger.info("START AII CHAT LANGCHAIN SERVICE")
+    logger.info("#################### AII ####################")
+
     global httpx_session
     global aii_admin_api
     global retrieval_plugin_api
@@ -72,7 +79,10 @@ async def pre_trained_chat_search(websocket: WebSocket, chat_id: str):
         try:
             # Receive and send back the client message
             request = await websocket.receive_text()
-            search_query, ai_response_enabled = itemgetter('search_query', 'ai_response_enabled')(json.loads(request))
+            req_data = json.loads(request)
+            search_query = req_data.get('search_query', None)
+            ai_response_enabled = req_data.get('ai_response_enabled', True)
+            temperature = req_data.get('temperature', 0)
 
             # if not(user):
             #     resp = ChatResponse(
@@ -108,16 +118,18 @@ async def pre_trained_chat_search(websocket: WebSocket, chat_id: str):
             )
 
             custom_docs = [Document(page_content=doc.text) for doc in query_result.results]
+            docs_resp = ChatResponse(sender="bot", message=json.dumps(query_result.dict(exclude={"query"})), type="docs")
+            await websocket.send_json(docs_resp.dict())
 
             if ai_response_enabled:
-                qa_chain = get_chain(clientVector, question_handler, stream_handler, chat_settings.langchain_condense_template, chat_settings.langchain_template, custom_docs=custom_docs)
+                qa_chain = get_chain(clientVector, question_handler, stream_handler,
+                                     chat_settings.langchain_condense_template, chat_settings.langchain_template,
+                                     custom_docs=custom_docs, temperature=temperature, model_name=chat_settings.model_name,
+                                     top_k_docs_for_context=chat_settings.langchain_chat_doc_count)
                 result = await qa_chain.acall(
                    {"question": search_query, "chat_history": []}
                 )
                 chat_history.append((result['question'], result["answer"]))
-
-            docs_resp = ChatResponse(sender="bot", message=json.dumps(query_result.dict(exclude={"query"})), type="docs")
-            await websocket.send_json(docs_resp.dict())
 
             end_resp = ChatResponse(sender="bot", message="", type="end")
             await websocket.send_json(end_resp.dict())
@@ -145,7 +157,9 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
         try:
             # Receive and send back the client message
             request = await websocket.receive_text()
-            messages = itemgetter('messages')(json.loads(request))
+            req_data = json.loads(request)
+            messages = req_data.get('messages', None)
+            temperature = req_data.get('temperature', 0)
             question = messages[-1]['content']
 
             # if not(user):
@@ -185,7 +199,10 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
 
             custom_docs = [Document(page_content=doc.text) for doc in query_result.results]
 
-            qa_chain = get_chain(clientVector, question_handler, stream_handler, chat_settings.langchain_condense_template, chat_settings.langchain_template, custom_docs=custom_docs)
+            qa_chain = get_chain(clientVector, question_handler, stream_handler,
+                                 chat_settings.langchain_condense_template, chat_settings.langchain_template,
+                                 custom_docs=custom_docs, temperature=temperature, model_name=chat_settings.model_name,
+                                 top_k_docs_for_context=chat_settings.langchain_chat_doc_count)
 
             result = await qa_chain.acall(
                {"question": question, "chat_history": lim_chat_history}
@@ -207,6 +224,7 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
             await websocket.send_json(resp.dict())
 
 
+# TODO delete
 @app.websocket("/chat/lead_form/{form_id}")
 async def lead_form_chat_endpoint_v1(websocket: WebSocket, form_id):
     await websocket.accept()
@@ -248,7 +266,9 @@ async def lead_form_chat_endpoint_v1(websocket: WebSocket, form_id):
 @app.websocket("/chat/v2/lead_form/{form_id}")
 async def lead_form_chat_endpoint_v2(websocket: WebSocket, form_id):
     await websocket.accept()
+    conn_id = str(uuid.uuid4())
     try:
+        logger.info("connect#%s start form#%s chatting", conn_id, form_id)
         api_key = await aii_admin_api.get_openai_key_by_leadform_id(form_id)
         if not api_key:
             resp = LeadFormChatResponse(
@@ -257,11 +277,13 @@ async def lead_form_chat_endpoint_v2(websocket: WebSocket, form_id):
                 type="error",
             )
             await websocket.send_json(resp.dict())
+            logger.info("connect#%s user with this form#%s doesn't have api_key in aii_admin", conn_id, form_id)
             raise ConnectionClosedError
 
         while True:
             data = await websocket.receive_text()
             user_input = json.loads(data)["text"]
+            logger.info('connect#%s user input: "%s"', conn_id, user_input)
 
             # Call GPT-3.5 API
             openai.api_key = api_key
@@ -277,31 +299,34 @@ async def lead_form_chat_endpoint_v2(websocket: WebSocket, form_id):
             )
 
             # Extract the text from the response
+            openai_resp = ''
             start_resp = LeadFormChatResponse(sender="bot", message="", type="start")
             await websocket.send_json(start_resp.dict())
             async for response_chunk in response:
                 delta = response_chunk.choices[0].delta
                 content = getattr(delta, "content", None)
                 if content:
+                    openai_resp += content
                     chat_resp = LeadFormChatResponse(
                         sender="bot",
                         message=content,
                         type="stream",
                     )
                     await websocket.send_json(chat_resp.dict())
-
+            logger.debug('connect#%s openai response: "%s"', conn_id, openai_resp)
             end_resp = LeadFormChatResponse(sender="bot", message="", type="end")
             await websocket.send_json(end_resp.dict())
 
-    except ConnectionClosedError:
+    except (ConnectionClosedError, WebSocketDisconnect):
         await websocket.close()
-    except openai.OpenAIError as error:
-        end_resp = LeadFormChatResponse(sender="bot", message=str(error), type="error")
+        logger.info("connect#%s closed because of ConnectionClosedError", conn_id)
+    except openai.OpenAIError as e:
+        end_resp = LeadFormChatResponse(sender="bot", message=str(e), type="error")
         await websocket.send_json(end_resp.dict())
         await websocket.close()
+        logging.error("Error occurred in WebSocket %s: %s\n%s", conn_id, e, traceback.format_exc())
 
 
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=9000)
