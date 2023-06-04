@@ -2,7 +2,6 @@
 import logging
 import json
 import httpx
-from operator import itemgetter
 from typing import Optional
 import openai
 import uuid
@@ -18,10 +17,10 @@ from langchain.docstore.document import Document
 from callback import QuestionGenCallbackHandler, StreamingLLMCallbackHandler
 from query_data import get_chain
 from schemas import ChatResponse, LeadFormChatResponse
-from usersData import getUsersData
 from services.aii_admin_service import AiiAdminApi
 from services.retrieval_plugin_service import RetrievalPluginApi
 from utils.vectorstore_utils import EmptyVectorStore
+from utils.prompt_utils import prompt_with_system_info
 from models.retrieval_plugin_query_models import QueryResult as RetrievalPluginResult, Queries as RetrievalPluginQueries
 from models.aii_admin_models import ChatSettings
 from logger import logger
@@ -121,8 +120,9 @@ async def pre_trained_chat_search(websocket: WebSocket, chat_id: str):
             await websocket.send_json(docs_resp.dict())
 
             if ai_response_enabled:
+                langchain_template = prompt_with_system_info(chat_settings.langchain_template)
                 qa_chain = get_chain(clientVector, question_handler, stream_handler,
-                                     chat_settings.langchain_condense_template, chat_settings.langchain_template,
+                                     chat_settings.langchain_condense_template, langchain_template,
                                      custom_docs=custom_docs, temperature=chat_settings.open_ai_temperature, model_name=chat_settings.model_name,
                                      top_k_docs_for_context=chat_settings.langchain_chat_doc_count)
                 result = await qa_chain.acall(
@@ -197,8 +197,9 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
 
             custom_docs = [Document(page_content=doc.text) for doc in query_result.results]
 
+            langchain_template = prompt_with_system_info(chat_settings.langchain_template)
             qa_chain = get_chain(clientVector, question_handler, stream_handler,
-                                 chat_settings.langchain_condense_template, chat_settings.langchain_template,
+                                 chat_settings.langchain_condense_template, langchain_template,
                                  custom_docs=custom_docs, temperature=chat_settings.open_ai_temperature, model_name=chat_settings.model_name,
                                  top_k_docs_for_context=chat_settings.langchain_chat_doc_count)
 
