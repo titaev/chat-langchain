@@ -74,6 +74,7 @@ async def pre_trained_chat_search(websocket: WebSocket, chat_id: str):
     stream_handler = StreamingLLMCallbackHandler(websocket)
     chat_history = []
     chat_settings: ChatSettings = await aii_admin_api.get_chat(chat_id)
+    chat_messages_per_month_limit = chat_settings.owner.tariff.chat_messages_per_month if chat_settings.owner.tariff else None
     while True:
         try:
             # Receive and send back the client message
@@ -94,6 +95,15 @@ async def pre_trained_chat_search(websocket: WebSocket, chat_id: str):
             clientVector = EmptyVectorStore()  # plug
             resp = ChatResponse(sender="you", message=search_query, type="stream")
             await websocket.send_json(resp.dict())
+
+            # check limits
+            if chat_messages_per_month_limit is not None:
+                user_actions_count_per_month = await aii_admin_api.get_user_actions_count_per_month(chat_settings.owner.id)
+                if user_actions_count_per_month.chat_messages_count >= chat_messages_per_month_limit:
+                    resp = ChatResponse(sender="bot", message=f"Month limit messages {chat_messages_per_month_limit} exceed", type="error")
+                    await websocket.send_json(resp.dict())
+                    logging.error("user#%s month limit messages exceed ws disconnect", chat_settings.owner.id)
+                    raise WebSocketDisconnect
 
             # Construct a response
             start_resp = ChatResponse(sender="bot", message="", type="start")
@@ -132,6 +142,11 @@ async def pre_trained_chat_search(websocket: WebSocket, chat_id: str):
 
             end_resp = ChatResponse(sender="bot", message="", type="end")
             await websocket.send_json(end_resp.dict())
+
+            # increment user chat_messages_count per month
+            incr_result = await aii_admin_api.increment_user_actions_count_per_month(chat_settings.owner.id)
+            logging.info(incr_result)
+
         except WebSocketDisconnect:
             logging.info("websocket disconnect")
             break
@@ -152,6 +167,7 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
     stream_handler = StreamingLLMCallbackHandler(websocket)
     chat_history = []
     chat_settings: ChatSettings = await aii_admin_api.get_chat(chat_id)
+    chat_messages_per_month_limit = chat_settings.owner.tariff.chat_messages_per_month if chat_settings.owner.tariff else None
     while True:
         try:
             # Receive and send back the client message
@@ -172,6 +188,15 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
             clientVector = EmptyVectorStore()  # plug
             resp = ChatResponse(sender="you", message=question, type="stream")
             await websocket.send_json(resp.dict())
+
+            # check limits
+            if chat_messages_per_month_limit is not None:
+                user_actions_count_per_month = await aii_admin_api.get_user_actions_count_per_month(chat_settings.owner.id)
+                if user_actions_count_per_month.chat_messages_count >= chat_messages_per_month_limit:
+                    resp = ChatResponse(sender="bot", message=f"Month limit messages {chat_messages_per_month_limit} exceed", type="error")
+                    await websocket.send_json(resp.dict())
+                    logging.error("user#%s month limit messages exceed ws disconnect", chat_settings.owner.id)
+                    raise WebSocketDisconnect
 
             # Construct a response
             start_resp = ChatResponse(sender="bot", message="", type="start")
@@ -210,6 +235,11 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
 
             end_resp = ChatResponse(sender="bot", message="", type="end")
             await websocket.send_json(end_resp.dict())
+
+            # increment user chat_messages_count per month
+            incr_result = await aii_admin_api.increment_user_actions_count_per_month(chat_settings.owner.id)
+            logging.info(incr_result)
+
         except WebSocketDisconnect:
             logging.info("websocket disconnect")
             break
