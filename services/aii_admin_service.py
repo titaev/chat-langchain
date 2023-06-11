@@ -14,11 +14,11 @@ class AiiAdminApi:
     def __init__(self, httpx_session):
         self._httpx_session = httpx_session
 
-    async def get_openai_key_by_leadform_id(self, form_id):
+    async def get_user_by_leadform_id(self, form_id):
         url = f"{self._url}/api/v1/lead_forms/{form_id}/chatapi/user/"
         resp = await self._httpx_session.get(url, headers=self._headers)
         resp_data = resp.json()
-        return resp_data['owner']['openai_key']
+        return resp_data['owner']
 
     async def get_chat(self, chat_id) -> Optional[ChatSettings]:
         url = f"{self._url}/api/v1/aii_chat_api/training/chat/{chat_id}"

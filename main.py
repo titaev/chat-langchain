@@ -1,5 +1,4 @@
 """Main entrypoint for the app."""
-import logging
 import json
 import httpx
 from typing import Optional
@@ -70,11 +69,15 @@ async def get():
 @app.websocket("/trained_chat/{chat_id}/search/")
 async def pre_trained_chat_search(websocket: WebSocket, chat_id: str):
     await websocket.accept()
+    conn_id = str(uuid.uuid4())
+    logger.info("connect#%s start chat_search#%s", conn_id, chat_id)
     question_handler = QuestionGenCallbackHandler(websocket)
     stream_handler = StreamingLLMCallbackHandler(websocket)
     chat_history = []
     chat_settings: ChatSettings = await aii_admin_api.get_chat(chat_id)
+    logger.debug("connect#%s chat_settings#%s", conn_id, chat_settings)
     chat_messages_per_month_limit = chat_settings.owner.tariff.chat_messages_per_month if chat_settings.owner.tariff else None
+    logger.debug("connect#%s chat_messages_per_month_limit=%s", conn_id, chat_messages_per_month_limit)
     while True:
         try:
             # Receive and send back the client message
@@ -100,9 +103,9 @@ async def pre_trained_chat_search(websocket: WebSocket, chat_id: str):
             if chat_messages_per_month_limit is not None:
                 user_actions_count_per_month = await aii_admin_api.get_user_actions_count_per_month(chat_settings.owner.id)
                 if user_actions_count_per_month.chat_messages_count >= chat_messages_per_month_limit:
-                    resp = ChatResponse(sender="bot", message=f"Month limit messages {chat_messages_per_month_limit} exceed", type="error")
+                    resp = ChatResponse(sender="bot", message=f"Month limit messages {chat_messages_per_month_limit} exceeded", type="tariff_limit_exceeded")
                     await websocket.send_json(resp.dict())
-                    logging.error("user#%s month limit messages exceed ws disconnect", chat_settings.owner.id)
+                    logger.warning("connect#%s user#%s month limit messages exceed ws disconnect", conn_id, chat_settings.owner.id)
                     raise WebSocketDisconnect
 
             # Construct a response
@@ -121,11 +124,14 @@ async def pre_trained_chat_search(websocket: WebSocket, chat_id: str):
                 }
               ]
             }
+
+            logger.info("connect#%s search query %s", conn_id, search_query)
             query_result: RetrievalPluginResult = await retrieval_plugin_api.query(
                 queries=RetrievalPluginQueries(**queries)
             )
 
             custom_docs = [Document(page_content=doc.text) for doc in query_result.results]
+            logger.info("connect#%s search query founded docs count=%s", conn_id, len(custom_docs))
             docs_resp = ChatResponse(sender="bot", message=json.dumps(query_result.dict(exclude={"query"})), type="docs")
             await websocket.send_json(docs_resp.dict())
 
@@ -145,29 +151,33 @@ async def pre_trained_chat_search(websocket: WebSocket, chat_id: str):
 
             # increment user chat_messages_count per month
             incr_result = await aii_admin_api.increment_user_actions_count_per_month(chat_settings.owner.id)
-            logging.info(incr_result)
 
         except WebSocketDisconnect:
-            logging.info("websocket disconnect")
+            logger.info("connect#%s websocket disconnect", conn_id)
             break
         except Exception as e:
-            logging.error(e, exc_info=True)
+            logger.error(e, exc_info=True)
             resp = ChatResponse(
                 sender="bot",
                 message=str(e),
                 type="error",
             )
             await websocket.send_json(resp.dict())
+            logger.info("connect#%s websocket disconnect because of error", conn_id)
 
 
 @app.websocket("/trained_chat/{chat_id}")
 async def pre_trained_chat(websocket: WebSocket, chat_id: str):
     await websocket.accept()
+    conn_id = str(uuid.uuid4())
+    logger.info("connect#%s start chat#%s", conn_id, chat_id)
     question_handler = QuestionGenCallbackHandler(websocket)
     stream_handler = StreamingLLMCallbackHandler(websocket)
     chat_history = []
     chat_settings: ChatSettings = await aii_admin_api.get_chat(chat_id)
+    logger.debug("connect#%s chat_settings#%s", conn_id, chat_settings)
     chat_messages_per_month_limit = chat_settings.owner.tariff.chat_messages_per_month if chat_settings.owner.tariff else None
+    logger.debug("connect#%s chat_messages_per_month_limit=%s", conn_id, chat_messages_per_month_limit)
     while True:
         try:
             # Receive and send back the client message
@@ -175,6 +185,7 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
             req_data = json.loads(request)
             messages = req_data.get('messages', None)
             question = messages[-1]['content']
+            logger.info("connect#%s chat question %s", conn_id, question)
 
             # if not(user):
             #     resp = ChatResponse(
@@ -193,9 +204,9 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
             if chat_messages_per_month_limit is not None:
                 user_actions_count_per_month = await aii_admin_api.get_user_actions_count_per_month(chat_settings.owner.id)
                 if user_actions_count_per_month.chat_messages_count >= chat_messages_per_month_limit:
-                    resp = ChatResponse(sender="bot", message=f"Month limit messages {chat_messages_per_month_limit} exceed", type="error")
+                    resp = ChatResponse(sender="bot", message=f"Month limit messages {chat_messages_per_month_limit} exceeded", type="tariff_limit_exceeded")
                     await websocket.send_json(resp.dict())
-                    logging.error("user#%s month limit messages exceed ws disconnect", chat_settings.owner.id)
+                    logger.warning("connect#%s user#%s month limit messages exceed ws disconnect", conn_id, chat_settings.owner.id)
                     raise WebSocketDisconnect
 
             # Construct a response
@@ -221,6 +232,12 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
             )
 
             custom_docs = [Document(page_content=doc.text) for doc in query_result.results]
+            logger.info("connect#%s search query founded docs count=%s", conn_id, len(custom_docs))
+
+            # send source links
+            source_links = [result.metadata.url for result in query_result.results]
+            docs_resp = ChatResponse(sender="bot", message=json.dumps(source_links), type="source_links")
+            await websocket.send_json(docs_resp.dict())
 
             langchain_template = prompt_with_system_info(chat_settings.langchain_template)
             qa_chain = get_chain(clientVector, question_handler, stream_handler,
@@ -238,58 +255,20 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
 
             # increment user chat_messages_count per month
             incr_result = await aii_admin_api.increment_user_actions_count_per_month(chat_settings.owner.id)
-            logging.info(incr_result)
+            logger.info(incr_result)
 
         except WebSocketDisconnect:
-            logging.info("websocket disconnect")
+            logger.info("connect#%s websocket disconnect", conn_id)
             break
         except Exception as e:
-            logging.error(e, exc_info=True)
+            logger.error(e, exc_info=True)
             resp = ChatResponse(
                 sender="bot",
                 message=str(e),
                 type="error",
             )
             await websocket.send_json(resp.dict())
-
-
-# TODO delete
-@app.websocket("/chat/lead_form/{form_id}")
-async def lead_form_chat_endpoint_v1(websocket: WebSocket, form_id):
-    await websocket.accept()
-    try:
-        api_key = await aii_admin_api.get_openai_key_by_leadform_id(form_id)
-        if not api_key:
-            raise ConnectionClosedError
-
-        while True:
-            data = await websocket.receive_text()
-            user_input = json.loads(data)["text"]
-
-            # Call GPT-3.5 API
-            openai.api_key = api_key
-
-            response = await openai.ChatCompletion.acreate(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": user_input}],
-                max_tokens=1024,
-                n=1,
-                stop=None,
-                temperature=0.4,
-                stream=True
-            )
-
-            # Extract the text from the response
-            async for response_chunk in response:
-                delta = response_chunk.choices[0].delta
-                content = getattr(delta, "content", None)
-                if content:
-                    await websocket.send_text(content)
-
-            await websocket.send_text(json.dumps({'type': 'response_end'}))
-
-    except ConnectionClosedError:
-        await websocket.close()
+            logger.info("connect#%s websocket disconnect because of error", conn_id)
 
 
 @app.websocket("/chat/v2/lead_form/{form_id}")
@@ -298,7 +277,11 @@ async def lead_form_chat_endpoint_v2(websocket: WebSocket, form_id):
     conn_id = str(uuid.uuid4())
     try:
         logger.info("connect#%s start form#%s chatting", conn_id, form_id)
-        api_key = await aii_admin_api.get_openai_key_by_leadform_id(form_id)
+        owner = await aii_admin_api.get_user_by_leadform_id(form_id)
+        logger.debug("connect#%s owner %s", conn_id, owner)
+        api_key = owner["openai_key"]
+        chat_messages_per_month_limit = owner['tariff']["chat_messages_per_month"] if owner['tariff'] else None
+        logger.debug("connect#%s chat_messages_per_month_limit=%s", conn_id, chat_messages_per_month_limit)
         if not api_key:
             resp = LeadFormChatResponse(
                 sender="bot",
@@ -313,6 +296,17 @@ async def lead_form_chat_endpoint_v2(websocket: WebSocket, form_id):
             data = await websocket.receive_text()
             user_input = json.loads(data)["text"]
             logger.info('connect#%s user input: "%s"', conn_id, user_input)
+
+            # check limits
+            if chat_messages_per_month_limit is not None:
+                user_actions_count_per_month = await aii_admin_api.get_user_actions_count_per_month(owner['id'])
+                if user_actions_count_per_month.chat_messages_count >= chat_messages_per_month_limit:
+                    resp = ChatResponse(sender="bot",
+                                        message=f"Month limit messages {chat_messages_per_month_limit} exceeded",
+                                        type="tariff_limit_exceeded")
+                    await websocket.send_json(resp.dict())
+                    logger.warning("connect#%s user#%s month limit messages exceed ws disconnect", conn_id, owner['id'])
+                    raise WebSocketDisconnect
 
             # Call GPT-3.5 API
             openai.api_key = api_key
@@ -346,6 +340,10 @@ async def lead_form_chat_endpoint_v2(websocket: WebSocket, form_id):
             end_resp = LeadFormChatResponse(sender="bot", message="", type="end")
             await websocket.send_json(end_resp.dict())
 
+            # increment user chat_messages_count per month
+            incr_result = await aii_admin_api.increment_user_actions_count_per_month(owner['id'])
+            logger.info(incr_result)
+
     except (ConnectionClosedError, WebSocketDisconnect):
         await websocket.close()
         logger.info("connect#%s closed because of ConnectionClosedError", conn_id)
@@ -353,7 +351,11 @@ async def lead_form_chat_endpoint_v2(websocket: WebSocket, form_id):
         end_resp = LeadFormChatResponse(sender="bot", message=str(e), type="error")
         await websocket.send_json(end_resp.dict())
         await websocket.close()
-        logging.error("Error occurred in WebSocket %s: %s\n%s", conn_id, e, traceback.format_exc())
+        logger.error("connect#%s error occurred in WebSocket: %s\n%s", conn_id, e, traceback.format_exc())
+    except Exception as e:
+        await websocket.close()
+        logger.error("connect#%s error occurred in WebSocket: %s\n%s", conn_id, e, traceback.format_exc())
+
 
 
 if __name__ == "__main__":
