@@ -9,6 +9,7 @@ from langchain.vectorstores.base import VectorStore
 from langchain.prompts.prompt import PromptTemplate
 from typing import Any, Dict, List, Tuple, Optional
 from langchain.docstore.document import Document
+from logger import logger
 
 
 def _get_chat_history(chat_history: List[Tuple[str, str]]) -> str:
@@ -18,6 +19,54 @@ def _get_chat_history(chat_history: List[Tuple[str, str]]) -> str:
         ai = "Assistant: " + ai_s
         buffer += "\n" + "\n".join([human, ai])
     return buffer
+
+
+class ChatHistorySupport:
+    default_condense_template = """Given the following conversation and a follow up question, rephrase the follow up question to be a standalone question. 
+    This question must be in the same language as Follow up question. Follow up question has a greater advantage in meaning, because this is the last question from the human in the conversation. But it is also worth considering the entire history of the conversation. 
+    You should assume that this should be question. If Follow up question is very different from the previous conversation in meaning, then just return this Follow up question as a result. Do not try to take the result from the user's questions directly from the Chat History.
+                            Chat History:
+                            {chat_history}
+                            Follow up question: {question}
+                            Standalone question:"""
+
+    def __init__(self, question_handler, model_name='gpt-3.5-turbo', condense_template=None):
+        condense_template = condense_template if condense_template else self.default_condense_template
+        manager = AsyncCallbackManager([])
+        question_manager = AsyncCallbackManager([question_handler])
+        condence_question_prompt = PromptTemplate.from_template(condense_template)
+        question_gen_llm = OpenAIChat(
+            model_name=model_name,
+            temperature=0.1,
+            verbose=True,
+            callback_manager=question_manager,
+        )
+        self.question_generator = LLMChain(
+            llm=question_gen_llm, prompt=condence_question_prompt, callback_manager=manager
+        )
+
+    async def get_new_question(self, question, chat_history: List[Dict]):
+        """create new question from chat history and current question"""
+        chat_history_str = self._get_chat_history(chat_history)
+        if chat_history_str:
+            new_question = await self.question_generator.arun(
+                question=question, chat_history=chat_history_str
+            )
+            logger.debug("chat_history_str %s", chat_history_str)
+        else:
+            new_question = question
+        return new_question
+
+    @staticmethod
+    def _get_chat_history(chat_history: List[Dict]) -> str:
+        buffer = ""
+        for msg in chat_history:
+            if msg["role"] == "user":
+                buffer_msg = f"Human: {msg['content']}"
+            else:
+                buffer_msg = f"Assistant: {msg['content']}"
+            buffer += f"\n {buffer_msg}"
+        return buffer
 
 
 class MyChatVectorDBChain(ChatVectorDBChain):
@@ -84,7 +133,7 @@ def get_chain(
         callback_manager=stream_manager,
         verbose=True,
         temperature=temperature,
-        max_tokens=675
+        max_tokens=-1   # no limit (openai api max limit)
     )
     CONDENSE_QUESTION_PROMPT = PromptTemplate.from_template(condense_template)
     QA_PROMPT = PromptTemplate(template=qa_prompt, input_variables=["question", "context"])

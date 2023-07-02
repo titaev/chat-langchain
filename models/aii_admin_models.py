@@ -22,6 +22,7 @@ class ChatSettings(BaseModel):
     langchain_template: str
     langchain_condense_template: str
     langchain_chat_doc_count: int
+    langchain_chat_history_enable: bool
     owner: ChatUser
 
     @validator('langchain_template', 'langchain_condense_template', pre=True, always=True)
