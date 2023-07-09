@@ -32,6 +32,7 @@ class ChatHistorySupport:
 
     def __init__(self, question_handler, model_name='gpt-3.5-turbo', condense_template=None):
         condense_template = condense_template if condense_template else self.default_condense_template
+        logger.debug("condense_template %s", condense_template)
         manager = AsyncCallbackManager([])
         question_manager = AsyncCallbackManager([question_handler])
         condence_question_prompt = PromptTemplate.from_template(condense_template)
@@ -77,25 +78,9 @@ class MyChatVectorDBChain(ChatVectorDBChain):
         self.custom_docs = custom_docs
 
     async def _acall(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        question = inputs["question"]
-        chat_history_str = _get_chat_history(inputs["chat_history"])
-        vectordbkwargs = inputs.get("vectordbkwargs", {})
-        if chat_history_str:
-            new_question = await self.question_generator.arun(
-                question=question, chat_history=chat_history_str
-            )
-        else:
-            new_question = question
         # TODO: This blocks the event loop, but it's not clear how to avoid it.
-        if self.custom_docs:
-            docs = self.custom_docs
-        else:
-            docs = self.vectorstore.similarity_search(
-                new_question, k=self.top_k_docs_for_context, **vectordbkwargs
-            )
+        docs = self.custom_docs
         new_inputs = inputs.copy()
-        new_inputs["question"] = new_question
-        new_inputs["chat_history"] = chat_history_str
         answer, _ = await self.combine_docs_chain.acombine_docs(docs, **new_inputs)
         if self.return_source_documents:
             return {self.output_key: answer, "source_documents": docs}

@@ -141,7 +141,7 @@ async def pre_trained_chat_search(websocket: WebSocket, chat_id: str):
                 if ai_response_enabled:
                     langchain_template = prompt_with_system_info(chat_settings.langchain_template)
                     qa_chain = get_chain(clientVector, question_handler, stream_handler,
-                                         chat_settings.langchain_condense_template, langchain_template,
+                                         '', langchain_template,
                                          custom_docs=custom_docs, temperature=chat_settings.open_ai_temperature, model_name=chat_settings.model_name,
                                          top_k_docs_for_context=chat_settings.langchain_chat_doc_count)
                     result = await qa_chain.acall(
@@ -220,12 +220,12 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
                 # form new question chat_history_support
                 if chat_settings.langchain_chat_history_enable:
                     logger.debug("connect#%s chat history enabled", conn_id)
-                    lim_chat_history_new = messages[-7:-1] if messages else []
-                    logger.debug("connect#%s chat history %s", conn_id, lim_chat_history_new)
+                    lim_chat_history = messages[-7:-1] if messages else []
+                    logger.debug("connect#%s chat history %s", conn_id, lim_chat_history)
                     logger.debug("connect#%s user question %s", conn_id, question)
-                    if lim_chat_history_new:
-                        chat_history_support = ChatHistorySupport(question_handler, condense_template=None)
-                        question = await chat_history_support.get_new_question(question, lim_chat_history_new)
+                    if lim_chat_history:
+                        chat_history_support = ChatHistorySupport(question_handler, condense_template=chat_settings.langchain_condense_template)
+                        question = await chat_history_support.get_new_question(question, lim_chat_history)
                         logger.debug("connect#%s created question %s", conn_id, question)
 
                 # make query to retrieval plugin
@@ -254,7 +254,7 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
 
                 langchain_template = prompt_with_system_info(chat_settings.langchain_template)
                 qa_chain = get_chain(clientVector, question_handler, stream_handler,
-                                     chat_settings.langchain_condense_template, langchain_template,
+                                     '', langchain_template,
                                      custom_docs=custom_docs, temperature=chat_settings.open_ai_temperature, model_name=chat_settings.model_name,
                                      top_k_docs_for_context=chat_settings.langchain_chat_doc_count)
 
