@@ -3,6 +3,7 @@ def prompt_with_system_info(prompt):
         
 Question: {{question}}
 =========
+Documents: 
 {{context}}
 =========
 Answer in Markdown format:

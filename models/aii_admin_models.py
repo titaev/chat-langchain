@@ -24,6 +24,8 @@ class ChatSettings(BaseModel):
     langchain_chat_doc_count: int
     langchain_chat_history_enable: bool
     owner: ChatUser
+    references_enabled: bool
+    doc_links_in_answer_enabled = bool
 
     @validator('langchain_template', 'langchain_condense_template', pre=True, always=True)
     def empty_string_if_none(cls, v):

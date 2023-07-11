@@ -21,6 +21,8 @@ from services.aii_admin_service import AiiAdminApi
 from services.retrieval_plugin_service import RetrievalPluginApi
 from utils.vectorstore_utils import EmptyVectorStore
 from utils.prompt_utils import prompt_with_system_info
+from utils.doc_links_in_answer_utils import doc_links_answer_support
+from limits import ChatMessagesLimit
 from models.retrieval_plugin_query_models import QueryResult as RetrievalPluginResult, Queries as RetrievalPluginQueries
 from models.aii_admin_models import ChatSettings
 from logger import logger
@@ -79,8 +81,6 @@ async def pre_trained_chat_search(websocket: WebSocket, chat_id: str):
         chat_history = []
         chat_settings: ChatSettings = await aii_admin_api.get_chat(chat_id)
         logger.debug("connect#%s chat_settings#%s", conn_id, chat_settings)
-        chat_messages_per_month_limit = chat_settings.owner.tariff.chat_messages_per_month if chat_settings.owner.tariff else None
-        logger.debug("connect#%s chat_messages_per_month_limit=%s", conn_id, chat_messages_per_month_limit)
         while True:
             try:
                 # Receive and send back the client message
@@ -89,27 +89,16 @@ async def pre_trained_chat_search(websocket: WebSocket, chat_id: str):
                 search_query = req_data.get('search_query', None)
                 ai_response_enabled = req_data.get('ai_response_enabled', True)
 
-                # if not(user):
-                #     resp = ChatResponse(
-                #         sender="bot",
-                #         message="Client with such id doesn't exist.",
-                #         type="error",
-                #     )
-                #     await websocket.send_json(resp.dict())
-                #     continue
-
                 clientVector = EmptyVectorStore()  # plug
                 resp = ChatResponse(sender="you", message=search_query, type="stream")
                 await websocket.send_json(resp.dict())
 
                 # check limits
-                if chat_messages_per_month_limit is not None:
-                    user_actions_count_per_month = await aii_admin_api.get_user_actions_count_per_month(chat_settings.owner.id)
-                    if user_actions_count_per_month.chat_messages_count >= chat_messages_per_month_limit:
-                        resp = ChatResponse(sender="bot", message=f"Month limit messages {chat_messages_per_month_limit} exceeded", type="tariff_limit_exceeded")
-                        await websocket.send_json(resp.dict())
-                        logger.warning("connect#%s user#%s month limit messages exceed ws disconnect", conn_id, chat_settings.owner.id)
-                        raise WebSocketDisconnect
+                chat_messages_limit = ChatMessagesLimit(chat_settings, conn_id, aii_admin_api)
+                if not await chat_messages_limit.is_chat_message_allowed():
+                    resp = ChatResponse(sender="bot", message=f"Month limit messages {chat_messages_limit.per_month} exceeded", type="tariff_limit_exceeded")
+                    await websocket.send_json(resp.dict())
+                    raise WebSocketDisconnect
 
                 # Construct a response
                 start_resp = ChatResponse(sender="bot", message="", type="start")
@@ -180,8 +169,6 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
         chat_history = []
         chat_settings: ChatSettings = await aii_admin_api.get_chat(chat_id)
         logger.debug("connect#%s chat_settings#%s", conn_id, chat_settings)
-        chat_messages_per_month_limit = chat_settings.owner.tariff.chat_messages_per_month if chat_settings.owner.tariff else None
-        logger.debug("connect#%s chat_messages_per_month_limit=%s", conn_id, chat_messages_per_month_limit)
         while True:
             try:
                 # Receive and send back the client message
@@ -205,13 +192,11 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
                 await websocket.send_json(resp.dict())
 
                 # check limits
-                if chat_messages_per_month_limit is not None:
-                    user_actions_count_per_month = await aii_admin_api.get_user_actions_count_per_month(chat_settings.owner.id)
-                    if user_actions_count_per_month.chat_messages_count >= chat_messages_per_month_limit:
-                        resp = ChatResponse(sender="bot", message=f"Month limit messages {chat_messages_per_month_limit} exceeded", type="tariff_limit_exceeded")
-                        await websocket.send_json(resp.dict())
-                        logger.warning("connect#%s user#%s month limit messages exceed ws disconnect", conn_id, chat_settings.owner.id)
-                        raise WebSocketDisconnect
+                chat_messages_limit = ChatMessagesLimit(chat_settings, conn_id, aii_admin_api)
+                if not await chat_messages_limit.is_chat_message_allowed():
+                    resp = ChatResponse(sender="bot", message=f"Month limit messages {chat_messages_limit.per_month} exceeded", type="tariff_limit_exceeded")
+                    await websocket.send_json(resp.dict())
+                    raise WebSocketDisconnect
 
                 # Construct a response
                 start_resp = ChatResponse(sender="bot", message="", type="start")
@@ -220,7 +205,7 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
                 # form new question chat_history_support
                 if chat_settings.langchain_chat_history_enable:
                     logger.debug("connect#%s chat history enabled", conn_id)
-                    lim_chat_history = messages[-7:-1] if messages else []
+                    lim_chat_history = messages[-8:-1] if messages else []
                     logger.debug("connect#%s chat history %s", conn_id, lim_chat_history)
                     logger.debug("connect#%s user question %s", conn_id, question)
                     if lim_chat_history:
@@ -244,15 +229,22 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
                     queries=RetrievalPluginQueries(**queries)
                 )
 
-                custom_docs = [Document(page_content=doc.text) for doc in query_result.results]
+                custom_docs = [Document(page_content=doc.text, metadata={"url": doc.metadata.url}) for doc in query_result.results]
                 logger.info("connect#%s search query founded docs count=%s", conn_id, len(custom_docs))
+                if chat_settings.doc_links_in_answer_enabled:
+                    custom_docs = doc_links_answer_support.enrich_docs_with_source_links(custom_docs)
 
                 # send source links
-                source_links = [result.metadata.url for result in query_result.results]
-                docs_resp = ChatResponse(sender="bot", message=json.dumps(source_links), type="source_links")
-                await websocket.send_json(docs_resp.dict())
+                if chat_settings.references_enabled:
+                    source_links = [doc.metadata.url for doc in query_result.results]
+                    docs_resp = ChatResponse(sender="bot", message=json.dumps(source_links), type="source_links")
+                    await websocket.send_json(docs_resp.dict())
 
-                langchain_template = prompt_with_system_info(chat_settings.langchain_template)
+                langchain_template = chat_settings.langchain_template
+                if chat_settings.doc_links_in_answer_enabled:
+                    langchain_template = doc_links_answer_support.prompt_support(langchain_template)
+                langchain_template = prompt_with_system_info(langchain_template)
+
                 qa_chain = get_chain(clientVector, question_handler, stream_handler,
                                      '', langchain_template,
                                      custom_docs=custom_docs, temperature=chat_settings.open_ai_temperature, model_name=chat_settings.model_name,
@@ -262,6 +254,7 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
                    {"question": question, "chat_history": []}
                 )
                 chat_history.append((result['question'], result["answer"]))
+
 
                 end_resp = ChatResponse(sender="bot", message="", type="end")
                 await websocket.send_json(end_resp.dict())

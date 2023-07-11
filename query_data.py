@@ -7,7 +7,7 @@ from langchain.chains.question_answering import load_qa_chain
 from langchain.llms import OpenAIChat
 from langchain.vectorstores.base import VectorStore
 from langchain.prompts.prompt import PromptTemplate
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple
 from langchain.docstore.document import Document
 from logger import logger
 
@@ -78,7 +78,6 @@ class MyChatVectorDBChain(ChatVectorDBChain):
         self.custom_docs = custom_docs
 
     async def _acall(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        # TODO: This blocks the event loop, but it's not clear how to avoid it.
         docs = self.custom_docs
         new_inputs = inputs.copy()
         answer, _ = await self.combine_docs_chain.acombine_docs(docs, **new_inputs)
