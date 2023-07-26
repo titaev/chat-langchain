@@ -233,6 +233,7 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
                 logger.info("connect#%s search query founded docs count=%s", conn_id, len(custom_docs))
                 if chat_settings.doc_links_in_answer_enabled:
                     custom_docs = doc_links_answer_support.enrich_docs_with_source_links(custom_docs)
+                logger.info("connect#%s search query founded docs custom_docs=%s", conn_id, custom_docs)
 
                 # send source links
                 if chat_settings.references_enabled:
@@ -244,6 +245,7 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
                 if chat_settings.doc_links_in_answer_enabled:
                     langchain_template = doc_links_answer_support.prompt_support(langchain_template)
                 langchain_template = prompt_with_system_info(langchain_template)
+                logger.info("connect#%s prompt=%s", conn_id, langchain_template)
 
                 qa_chain = get_chain(clientVector, question_handler, stream_handler,
                                      '', langchain_template,
@@ -254,6 +256,7 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
                    {"question": question, "chat_history": []}
                 )
                 chat_history.append((result['question'], result["answer"]))
+                logger.info("connect#%s, openai answer %s", conn_id, result["answer"])
 
 
                 end_resp = ChatResponse(sender="bot", message="", type="end")
