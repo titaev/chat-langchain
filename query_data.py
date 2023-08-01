@@ -12,16 +12,18 @@ from langchain.docstore.document import Document
 from logger import logger
 
 
-def _get_chat_history(chat_history: List[Tuple[str, str]]) -> str:
+def get_chat_history(chat_history: List[Dict]) -> str:
     buffer = ""
-    for human_s, ai_s in chat_history:
-        human = "Human: " + human_s
-        ai = "Assistant: " + ai_s
-        buffer += "\n" + "\n".join([human, ai])
+    for msg in chat_history:
+        if msg["role"] == "user":
+            buffer_msg = f"Human: {msg['content']}"
+        else:
+            buffer_msg = f"Assistant: {msg['content']}"
+        buffer += f"\n {buffer_msg}"
     return buffer
 
 
-class ChatHistorySupport:
+class ChatHistoryVectorstoreQuerySupport:
     default_condense_template = """Given the following conversation and a follow up question, rephrase the follow up question to be a standalone question. 
     This question must be in the same language as Follow up question. Follow up question has a greater advantage in meaning, because this is the last question from the human in the conversation. But it is also worth considering the entire history of the conversation. 
     You should assume that this should be question. If Follow up question is very different from the previous conversation in meaning, then just return this Follow up question as a result. Do not try to take the result from the user's questions directly from the Chat History.
@@ -48,7 +50,7 @@ class ChatHistorySupport:
 
     async def get_new_question(self, question, chat_history: List[Dict]):
         """create new question from chat history and current question"""
-        chat_history_str = self._get_chat_history(chat_history)
+        chat_history_str = get_chat_history(chat_history)
         if chat_history_str:
             new_question = await self.question_generator.arun(
                 question=question, chat_history=chat_history_str
@@ -57,17 +59,6 @@ class ChatHistorySupport:
         else:
             new_question = question
         return new_question
-
-    @staticmethod
-    def _get_chat_history(chat_history: List[Dict]) -> str:
-        buffer = ""
-        for msg in chat_history:
-            if msg["role"] == "user":
-                buffer_msg = f"Human: {msg['content']}"
-            else:
-                buffer_msg = f"Assistant: {msg['content']}"
-            buffer += f"\n {buffer_msg}"
-        return buffer
 
 
 class MyChatVectorDBChain(ChatVectorDBChain):
@@ -90,7 +81,7 @@ class MyChatVectorDBChain(ChatVectorDBChain):
 def get_chain(
     vectorstore: VectorStore, question_handler, stream_handler,
         condense_template, qa_prompt, tracing: bool = False, custom_docs=None,
-        temperature=0, model_name='gpt-3.5-turbo', top_k_docs_for_context=4
+        temperature=0, model_name='gpt-3.5-turbo', top_k_docs_for_context=4, langchain_chat_history_prompt_enable=False
 ) -> ChatVectorDBChain:
     """Create a ChatVectorDBChain for question/answering."""
     # Construct a ChatVectorDBChain with a streaming llm for combine docs
@@ -120,7 +111,12 @@ def get_chain(
         max_tokens=-1   # no limit (openai api max limit)
     )
     CONDENSE_QUESTION_PROMPT = PromptTemplate.from_template(condense_template)
-    QA_PROMPT = PromptTemplate(template=qa_prompt, input_variables=["question", "context"])
+
+    input_variables = ["question", "context"]
+    if langchain_chat_history_prompt_enable:
+        input_variables.append("chat_history")
+    QA_PROMPT = PromptTemplate(template=qa_prompt, input_variables=input_variables)
+
     question_generator = LLMChain(
         llm=question_gen_llm, prompt=CONDENSE_QUESTION_PROMPT, callback_manager=manager
     )
@@ -135,5 +131,6 @@ def get_chain(
         question_generator=question_generator,
         callback_manager=manager,
         top_k_docs_for_context=top_k_docs_for_context,
+        verbose=True
     )
     return qa

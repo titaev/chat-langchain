@@ -19,10 +19,12 @@ class ChatSettings(BaseModel):
     name: str
     model_name: str
     open_ai_temperature: float
+    score_vectorstore_docs_min_threshold: Optional[float]
     langchain_template: str
     langchain_condense_template: str
     langchain_chat_doc_count: int
     langchain_chat_history_enable: bool
+    langchain_chat_history_prompt_enable: bool
     owner: ChatUser
     references_enabled: bool
     doc_links_in_answer_enabled: bool

@@ -15,7 +15,7 @@ from websockets.exceptions import ConnectionClosedError
 from langchain.docstore.document import Document
 
 from callback import QuestionGenCallbackHandler, StreamingLLMCallbackHandler
-from query_data import get_chain, ChatHistorySupport
+from query_data import get_chain, ChatHistoryVectorstoreQuerySupport, get_chat_history
 from schemas import ChatResponse, LeadFormChatResponse
 from services.aii_admin_service import AiiAdminApi
 from services.retrieval_plugin_service import RetrievalPluginApi
@@ -122,7 +122,12 @@ async def pre_trained_chat_search(websocket: WebSocket, chat_id: str):
                     queries=RetrievalPluginQueries(**queries)
                 )
 
-                custom_docs = [Document(page_content=doc.text) for doc in query_result.results]
+                custom_docs = []
+                for doc in query_result.results:
+                    if chat_settings.score_vectorstore_docs_min_threshold and doc.score < chat_settings.score_vectorstore_docs_min_threshold:
+                        continue
+                    custom_docs.append(Document(page_content=doc.text, metadata={"url": doc.metadata.url}))
+
                 logger.info("connect#%s search query founded docs count=%s", conn_id, len(custom_docs))
                 docs_resp = ChatResponse(sender="bot", message=json.dumps(query_result.dict(exclude={"query"})), type="docs")
                 await websocket.send_json(docs_resp.dict())
@@ -203,13 +208,13 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
                 await websocket.send_json(start_resp.dict())
 
                 # form new question chat_history_support
+                lim_chat_history = messages[-8:-1] if messages else []
                 if chat_settings.langchain_chat_history_enable:
                     logger.debug("connect#%s chat history enabled", conn_id)
-                    lim_chat_history = messages[-8:-1] if messages else []
                     logger.debug("connect#%s chat history %s", conn_id, lim_chat_history)
                     logger.debug("connect#%s user question %s", conn_id, question)
                     if lim_chat_history:
-                        chat_history_support = ChatHistorySupport(question_handler, condense_template=chat_settings.langchain_condense_template)
+                        chat_history_support = ChatHistoryVectorstoreQuerySupport(question_handler, condense_template=chat_settings.langchain_condense_template)
                         question = await chat_history_support.get_new_question(question, lim_chat_history)
                         logger.debug("connect#%s created question %s", conn_id, question)
 
@@ -229,8 +234,13 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
                     queries=RetrievalPluginQueries(**queries)
                 )
 
-                custom_docs = [Document(page_content=doc.text, metadata={"url": doc.metadata.url}) for doc in query_result.results]
-                logger.info("connect#%s search query founded docs count=%s", conn_id, len(custom_docs))
+                custom_docs = []
+                for doc in query_result.results:
+                    if chat_settings.score_vectorstore_docs_min_threshold and doc.score < chat_settings.score_vectorstore_docs_min_threshold:
+                        continue
+                    custom_docs.append(Document(page_content=doc.text, metadata={"url": doc.metadata.url}))
+
+                logger.info("connect#%s search query founded docs (with appropriate score) count=%s", conn_id, len(custom_docs))
                 if chat_settings.doc_links_in_answer_enabled:
                     custom_docs = doc_links_answer_support.enrich_docs_with_source_links(custom_docs)
                 logger.info("connect#%s search query founded docs custom_docs=%s", conn_id, custom_docs)
@@ -244,16 +254,20 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
                 langchain_template = chat_settings.langchain_template
                 if chat_settings.doc_links_in_answer_enabled:
                     langchain_template = doc_links_answer_support.prompt_support(langchain_template)
-                langchain_template = prompt_with_system_info(langchain_template)
+                langchain_template = prompt_with_system_info(langchain_template, langchain_chat_history_prompt_enable=chat_settings.langchain_chat_history_prompt_enable)
                 logger.info("connect#%s prompt=%s", conn_id, langchain_template)
 
                 qa_chain = get_chain(clientVector, question_handler, stream_handler,
                                      '', langchain_template,
                                      custom_docs=custom_docs, temperature=chat_settings.open_ai_temperature, model_name=chat_settings.model_name,
-                                     top_k_docs_for_context=chat_settings.langchain_chat_doc_count)
+                                     top_k_docs_for_context=chat_settings.langchain_chat_doc_count, langchain_chat_history_prompt_enable=chat_settings.langchain_chat_history_prompt_enable)
+
+                lim_chat_history_str = ''
+                if chat_settings.langchain_chat_history_prompt_enable:
+                    lim_chat_history_str = get_chat_history(lim_chat_history)
 
                 result = await qa_chain.acall(
-                   {"question": question, "chat_history": []}
+                   {"question": question, "chat_history": lim_chat_history_str}
                 )
                 chat_history.append((result['question'], result["answer"]))
                 logger.info("connect#%s, openai answer %s", conn_id, result["answer"])
