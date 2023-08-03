@@ -4,12 +4,14 @@ from langchain.callbacks.tracers import LangChainTracer
 from langchain.chains import ChatVectorDBChain
 from langchain.chains.llm import LLMChain
 from langchain.chains.question_answering import load_qa_chain
+from langchain.chains.combine_documents.stuff import StuffDocumentsChain
 from langchain.llms import OpenAIChat
 from langchain.vectorstores.base import VectorStore
 from langchain.prompts.prompt import PromptTemplate
 from typing import Any, Dict, List, Tuple
 from langchain.docstore.document import Document
 from logger import logger
+from custom_chain import CustomLoggingChain
 
 
 def get_chat_history(chat_history: List[Dict]) -> str:
@@ -120,8 +122,18 @@ def get_chain(
     question_generator = LLMChain(
         llm=question_gen_llm, prompt=CONDENSE_QUESTION_PROMPT, callback_manager=manager
     )
-    doc_chain = load_qa_chain(
-        streaming_llm, chain_type="stuff", prompt=QA_PROMPT, callback_manager=manager
+    # doc_chain = load_qa_chain(
+    #     streaming_llm, chain_type="stuff", prompt=QA_PROMPT, callback_manager=manager
+    # )
+    qa_chain = CustomLoggingChain(
+        llm=streaming_llm, prompt=QA_PROMPT, verbose=True, callback_manager=manager
+    )
+
+    doc_chain = StuffDocumentsChain(
+        llm_chain=qa_chain,
+        document_variable_name="context",
+        verbose=True,
+        callback_manager=manager
     )
 
     qa = MyChatVectorDBChain(

@@ -19,9 +19,7 @@ class RetrievalPluginApi:
         url = f"{self._url}/query"
         resp = await self._httpx_session.post(url, headers=self._headers, json=queries.dict())
         if resp.status_code == 200:
-            print(resp.text)  # print the response text
             resp_data = resp.json()['results']
             return QueryResult(**resp_data[0]) if resp_data else None
         else:
-            print(f"Error: {resp.status_code}")
             raise
