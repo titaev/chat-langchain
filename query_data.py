@@ -46,7 +46,7 @@ class ChatHistoryVectorstoreQuerySupport:
             verbose=True,
             callback_manager=question_manager,
         )
-        self.question_generator = LLMChain(
+        self.question_generator = CustomLoggingChain(
             llm=question_gen_llm, prompt=condence_question_prompt, callback_manager=manager
         )
 

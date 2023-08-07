@@ -7,18 +7,18 @@ import uuid
 import traceback
 import os
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Depends
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import PlainTextResponse
 from langchain.vectorstores import VectorStore
 from websockets.exceptions import ConnectionClosedError
 from langchain.docstore.document import Document
+from services.aii_admin_service import AiiAdminApi
+from services.retrieval_plugin_service import RetrievalPluginApi
 
 from callback import QuestionGenCallbackHandler, StreamingLLMCallbackHandler
 from query_data import get_chain, ChatHistoryVectorstoreQuerySupport, get_chat_history
 from schemas import ChatResponse, LeadFormChatResponse
-from services.aii_admin_service import AiiAdminApi
-from services.retrieval_plugin_service import RetrievalPluginApi
 from utils.vectorstore_utils import EmptyVectorStore
 from utils.prompt_utils import prompt_with_system_info
 from utils.doc_links_in_answer_utils import doc_links_answer_support
@@ -26,13 +26,16 @@ from limits import ChatMessagesLimit
 from models.retrieval_plugin_query_models import QueryResult as RetrievalPluginResult, Queries as RetrievalPluginQueries
 from models.aii_admin_models import ChatSettings
 from logger import logger
+from smart_seller import router as smart_seller_router
+from dependencies import http_dependencies
+
+
 
 app = FastAPI()
+app.include_router(smart_seller_router)
+
 templates = Jinja2Templates(directory="templates")
 vectorstore: Optional[VectorStore] = None
-httpx_session: httpx.AsyncClient
-aii_admin_api: AiiAdminApi
-retrieval_plugin_api: RetrievalPluginApi
 general_openai_key = os.environ["OPENAI_API_KEY"]
 
 # app.add_middleware(HTTPSRedirectMiddleware)
@@ -45,19 +48,10 @@ async def startup():
     logger.info("START AII CHAT LANGCHAIN SERVICE")
     logger.info("#################### AII ####################")
 
-    global httpx_session
-    global aii_admin_api
-    global retrieval_plugin_api
-
-    httpx_session = httpx.AsyncClient()
-    aii_admin_api = AiiAdminApi(httpx_session)
-    retrieval_plugin_api = RetrievalPluginApi(httpx_session)
-
 
 @app.on_event("shutdown")
 async def shutdown():
-    global httpx_session
-    await httpx_session.aclose()
+    await http_dependencies.httpx_session.aclose()
 
 
 @app.get("/")
@@ -71,7 +65,12 @@ async def get():
 
 
 @app.websocket("/trained_chat/{chat_id}/search/")
-async def pre_trained_chat_search(websocket: WebSocket, chat_id: str):
+async def pre_trained_chat_search(
+        websocket: WebSocket,
+        chat_id: str,
+        aii_admin_api: AiiAdminApi = Depends(http_dependencies.get_aii_admin_api),
+        retrieval_plugin_api: RetrievalPluginApi = Depends(http_dependencies.get_retrieval_plugin_api)
+):
     await websocket.accept()
     conn_id = str(uuid.uuid4())
     logger.info("connect#%s start chat_search#%s", conn_id, chat_id)
@@ -164,7 +163,12 @@ async def pre_trained_chat_search(websocket: WebSocket, chat_id: str):
 
 
 @app.websocket("/trained_chat/{chat_id}")
-async def pre_trained_chat(websocket: WebSocket, chat_id: str):
+async def pre_trained_chat(
+        websocket: WebSocket,
+        chat_id: str,
+        aii_admin_api: AiiAdminApi = Depends(http_dependencies.get_aii_admin_api),
+        retrieval_plugin_api: RetrievalPluginApi = Depends(http_dependencies.get_retrieval_plugin_api)
+):
     await websocket.accept()
     conn_id = str(uuid.uuid4())
     logger.info("connect#%s start chat#%s", conn_id, chat_id)
@@ -295,7 +299,11 @@ async def pre_trained_chat(websocket: WebSocket, chat_id: str):
 
 
 @app.websocket("/chat/v2/lead_form/{form_id}")
-async def lead_form_chat_endpoint_v2(websocket: WebSocket, form_id):
+async def lead_form_chat_endpoint_v2(
+        websocket: WebSocket,
+        form_id,
+        aii_admin_api: AiiAdminApi = Depends(http_dependencies.get_aii_admin_api)
+):
     await websocket.accept()
     conn_id = str(uuid.uuid4())
     try:
