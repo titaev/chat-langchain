@@ -24,7 +24,7 @@ from utils.prompt_utils import prompt_with_system_info
 from utils.doc_links_in_answer_utils import doc_links_answer_support
 from limits import ChatMessagesLimit
 from models.retrieval_plugin_query_models import QueryResult as RetrievalPluginResult, Queries as RetrievalPluginQueries
-from models.aii_admin_models import ChatSettings, ActionForCredits
+from models.aii_admin_models import ChatSettings, ActionForCredits, LeadFormSettings
 from logger import logger
 from dependencies import http_dependencies
 
@@ -306,6 +306,8 @@ async def lead_form_chat_endpoint_v2(
     try:
         logger.info("connect#%s start form#%s chatting", conn_id, form_id)
         owner = await aii_admin_api.get_user_by_leadform_id(form_id)
+        lead_form: LeadFormSettings = await aii_admin_api.get_lead_form(form_id)
+
         logger.debug("connect#%s owner %s", conn_id, owner)
         api_key = general_openai_key
         chat_messages_per_month_limit = owner['tariff']["chat_messages_per_month"] if owner['tariff'] else None
@@ -350,9 +352,9 @@ async def lead_form_chat_endpoint_v2(
             openai.api_key = api_key
 
             response = await openai.ChatCompletion.acreate(
-                model="gpt-3.5-turbo-16k",
+                model=lead_form.model_name,
                 messages=[{"role": "user", "content": user_input}],
-                max_tokens=2500,
+                max_tokens=1500,
                 n=1,
                 stop=None,
                 temperature=0.4,

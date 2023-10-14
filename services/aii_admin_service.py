@@ -1,7 +1,7 @@
 from typing import Optional
 
 from config import config
-from models.aii_admin_models import ChatSettings, UserActionsCountPerMonth
+from models.aii_admin_models import ChatSettings, UserActionsCountPerMonth, LeadFormSettings
 
 
 class AiiAdminApi:
@@ -19,6 +19,12 @@ class AiiAdminApi:
         resp = await self._httpx_session.get(url, headers=self._headers)
         resp_data = resp.json()
         return resp_data['owner']
+
+    async def get_lead_form(self, form_id):
+        url = f"{self._url}/api/v1/lead_forms/{form_id}/widget/"
+        resp = await self._httpx_session.get(url, headers=self._headers)
+        resp_data = resp.json()
+        return LeadFormSettings(**resp_data)
 
     async def get_chat(self, chat_id) -> Optional[ChatSettings]:
         url = f"{self._url}/api/v1/aii_chat_api/training/chat/{chat_id}"

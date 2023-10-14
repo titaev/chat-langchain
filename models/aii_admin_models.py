@@ -35,6 +35,11 @@ class ChatSettings(BaseModel):
         return '' if v is None else v
 
 
+class LeadFormSettings(BaseModel):
+    id: str
+    model_name: str
+
+
 class UserActionsCountPerMonth(BaseModel):
     id: int
     year: int
