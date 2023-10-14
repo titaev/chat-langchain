@@ -1,5 +1,6 @@
 from pydantic import BaseModel, validator
 from typing import Optional
+from enum import Enum
 
 
 class ChatUserTariff(BaseModel):
@@ -40,3 +41,8 @@ class UserActionsCountPerMonth(BaseModel):
     month: int
     chat_messages_count: int
     user: int
+
+
+class ActionForCredits(Enum):
+    AI_REPLY_LEAD_FORM = "ai_reply_lead_form"
+    AI_CREATE_LEAD_FORM = "ai_create_lead_form"

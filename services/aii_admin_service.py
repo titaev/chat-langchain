@@ -38,3 +38,18 @@ class AiiAdminApi:
         resp = await self._httpx_session.post(url, headers=self._headers, json=data)
         resp_data = resp.json()
         return resp_data
+
+    async def is_possible_to_spend_credits(self, user_id, action) -> bool:
+        url = f"{self._url}/api/v1/aii_chat_api/user/{user_id}/credits/is_possible_to_spend/"
+        data = {"action": action}
+        resp = await self._httpx_session.post(url, headers=self._headers, json=data)
+        resp_data = resp.json()
+        return resp_data['is_possible']
+
+    async def spend_credits(self, user_id, action):
+        url = f"{self._url}/api/v1/aii_chat_api/user/{user_id}/credits/spend/"
+        data = {"action": action}
+        resp = await self._httpx_session.post(url, headers=self._headers, json=data)
+        resp_data = resp.json()
+        if resp_data['status'] != 'incremented':
+            raise

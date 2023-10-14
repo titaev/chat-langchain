@@ -24,15 +24,12 @@ from utils.prompt_utils import prompt_with_system_info
 from utils.doc_links_in_answer_utils import doc_links_answer_support
 from limits import ChatMessagesLimit
 from models.retrieval_plugin_query_models import QueryResult as RetrievalPluginResult, Queries as RetrievalPluginQueries
-from models.aii_admin_models import ChatSettings
+from models.aii_admin_models import ChatSettings, ActionForCredits
 from logger import logger
-from smart_seller import router as smart_seller_router
 from dependencies import http_dependencies
 
-
-
 app = FastAPI()
-app.include_router(smart_seller_router)
+# app.include_router(smart_seller_router)
 
 templates = Jinja2Templates(directory="templates")
 vectorstore: Optional[VectorStore] = None
@@ -339,13 +336,23 @@ async def lead_form_chat_endpoint_v2(
                     logger.warning("connect#%s user#%s month limit messages exceed ws disconnect", conn_id, owner['id'])
                     raise WebSocketDisconnect
 
+            # check credits
+            is_possible_to_spend_credits = await aii_admin_api.is_possible_to_spend_credits(owner['id'], action=ActionForCredits.AI_REPLY_LEAD_FORM.value)
+            if not is_possible_to_spend_credits:
+                logger.warning("connect#%s user#%s month limit credits exceed ws disconnect", conn_id, owner['id'])
+                resp = ChatResponse(sender="bot",
+                                    message=f"Month limit credits {chat_messages_per_month_limit} exceeded",
+                                    type="tariff_limit_exceeded")
+                await websocket.send_json(resp.dict())
+                raise WebSocketDisconnect
+
             # Call GPT-3.5 API
             openai.api_key = api_key
 
             response = await openai.ChatCompletion.acreate(
-                model="gpt-3.5-turbo",
+                model="gpt-3.5-turbo-16k",
                 messages=[{"role": "user", "content": user_input}],
-                max_tokens=1024,
+                max_tokens=2500,
                 n=1,
                 stop=None,
                 temperature=0.4,
@@ -373,6 +380,7 @@ async def lead_form_chat_endpoint_v2(
 
             # increment user chat_messages_count per month
             incr_result = await aii_admin_api.increment_user_actions_count_per_month(owner['id'])
+            await aii_admin_api.spend_credits(user_id=owner['id'], action=ActionForCredits.AI_REPLY_LEAD_FORM.value)
             logger.info(incr_result)
 
     except (ConnectionClosedError, WebSocketDisconnect):
