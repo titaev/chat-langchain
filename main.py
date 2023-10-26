@@ -362,28 +362,29 @@ async def lead_form_chat_endpoint_v2(
             )
 
             # Extract the text from the response
-            openai_resp = ''
-            start_resp = LeadFormChatResponse(sender="bot", message="", type="start")
-            await websocket.send_json(start_resp.dict())
-            async for response_chunk in response:
-                delta = response_chunk.choices[0].delta
-                content = getattr(delta, "content", None)
-                if content:
-                    openai_resp += content
-                    chat_resp = LeadFormChatResponse(
-                        sender="bot",
-                        message=content,
-                        type="stream",
-                    )
-                    await websocket.send_json(chat_resp.dict())
-            logger.debug('connect#%s openai response: "%s"', conn_id, openai_resp)
-            end_resp = LeadFormChatResponse(sender="bot", message="", type="end")
-            await websocket.send_json(end_resp.dict())
-
-            # increment user chat_messages_count per month
-            incr_result = await aii_admin_api.increment_user_actions_count_per_month(owner['id'])
-            await aii_admin_api.spend_credits(user_id=owner['id'], action=ActionForCredits.AI_REPLY_LEAD_FORM.value)
-            logger.info(incr_result)
+            try:
+                openai_resp = ''
+                start_resp = LeadFormChatResponse(sender="bot", message="", type="start")
+                await websocket.send_json(start_resp.dict())
+                async for response_chunk in response:
+                    delta = response_chunk.choices[0].delta
+                    content = getattr(delta, "content", None)
+                    if content:
+                        openai_resp += content
+                        chat_resp = LeadFormChatResponse(
+                            sender="bot",
+                            message=content,
+                            type="stream",
+                        )
+                        await websocket.send_json(chat_resp.dict())
+                logger.debug('connect#%s openai response: "%s"', conn_id, openai_resp)
+                end_resp = LeadFormChatResponse(sender="bot", message="", type="end")
+                await websocket.send_json(end_resp.dict())
+            finally:
+                # increment user chat_messages_count per month
+                incr_result = await aii_admin_api.increment_user_actions_count_per_month(owner['id'])
+                await aii_admin_api.spend_credits(user_id=owner['id'], action=ActionForCredits.AI_REPLY_LEAD_FORM.value)
+                logger.info(incr_result)
 
     except (ConnectionClosedError, WebSocketDisconnect):
         await websocket.close()
