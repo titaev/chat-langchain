@@ -24,7 +24,7 @@ from utils.prompt_utils import prompt_with_system_info
 from utils.doc_links_in_answer_utils import doc_links_answer_support
 from limits import ChatMessagesLimit
 from models.retrieval_plugin_query_models import QueryResult as RetrievalPluginResult, Queries as RetrievalPluginQueries
-from models.aii_admin_models import ChatSettings, ActionForCredits, LeadFormSettings
+from models.aii_admin_models import ChatSettings, ActionForCredits, LeadFormSettings, ChatUserTariffOpenAIKeySource
 from logger import logger
 from dependencies import http_dependencies
 
@@ -309,7 +309,7 @@ async def lead_form_chat_endpoint_v2(
         lead_form: LeadFormSettings = await aii_admin_api.get_lead_form(form_id)
 
         logger.debug("connect#%s owner %s", conn_id, owner)
-        api_key = general_openai_key
+        api_key = general_openai_key if owner['tariff']['open_ai_key_source'] == ChatUserTariffOpenAIKeySource.GENERAL.value else owner['openai_key']
         chat_messages_per_month_limit = owner['tariff']["chat_messages_per_month"] if owner['tariff'] else None
         logger.debug("connect#%s chat_messages_per_month_limit=%s", conn_id, chat_messages_per_month_limit)
         if not api_key:

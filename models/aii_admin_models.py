@@ -3,6 +3,11 @@ from typing import Optional
 from enum import Enum
 
 
+class ChatUserTariffOpenAIKeySource(Enum):
+    GENERAL = 'general'
+    USER = 'user'
+
+
 class ChatUserTariff(BaseModel):
     id: int
     name: str
