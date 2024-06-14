@@ -43,6 +43,7 @@ class ChatSettings(BaseModel):
 class LeadFormSettings(BaseModel):
     id: str
     model_name: str
+    collect_lead_strategy: str
 
 
 class UserActionsCountPerMonth(BaseModel):

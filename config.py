@@ -18,6 +18,10 @@ class Config(BaseSettings):
     log_level: str = "DEBUG"
     log_file: str = "chat-langchain.log"
 
+    disable_credit_key: str = "disable_credit_key"
+
+    email_ai_answer_non_obfuscate_symbols: int = 100
+
     class Config:
         env_file = str(Path(BASE_DIR, '.env'))
         env_file_encoding = 'utf-8'

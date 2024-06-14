@@ -59,3 +59,9 @@ class AiiAdminApi:
         resp_data = resp.json()
         if resp_data['status'] != 'incremented':
             raise
+
+    async def update_filling(self, form_id, session_id, filling_id, ai_response):
+        url = f"{self._url}/lead_forms/{form_id}/session/{session_id}/filling/{filling_id}"
+
+        data = {"ai_response": ai_response}
+        await self._httpx_session.patch(url, headers=self._headers, json=data)

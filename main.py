@@ -1,13 +1,12 @@
 """Main entrypoint for the app."""
 import json
-import httpx
 from typing import Optional
 import openai
 import uuid
 import traceback
 import os
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Depends
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Depends, Query
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import PlainTextResponse
 from langchain.vectorstores import VectorStore
@@ -27,6 +26,10 @@ from models.retrieval_plugin_query_models import QueryResult as RetrievalPluginR
 from models.aii_admin_models import ChatSettings, ActionForCredits, LeadFormSettings, ChatUserTariffOpenAIKeySource
 from logger import logger
 from dependencies import http_dependencies
+from utils.utils import is_disable_credit_mode_enabled
+import random
+from config import config
+
 
 app = FastAPI()
 # app.include_router(smart_seller_router)
@@ -59,6 +62,15 @@ async def get(request: Request):
 @app.get("/", response_class=PlainTextResponse)
 async def get():
     return "Hello World"
+
+
+def shuffle_string(s):
+    shuffled_list = random.sample(s, len(s))
+    return ''.join(shuffled_list)
+
+
+def is_email_ai_answer(lead_form):
+    return bool(lead_form.collect_lead_strategy == 'email_ai_answer')
 
 
 @app.websocket("/trained_chat/{chat_id}/search/")
@@ -183,16 +195,6 @@ async def pre_trained_chat(
                 messages = req_data.get('messages', None)
                 question = messages[-1]['content']
                 logger.info("connect#%s chat question %s", conn_id, question)
-
-                # if not(user):
-                #     resp = ChatResponse(
-                #         sender="bot",
-                #         message="Client with such id doesn't exist.",
-                #         type="error",
-                #     )
-                #     await websocket.send_json(resp.dict())
-                #     continue
-
                 clientVector = EmptyVectorStore()  # plug
                 resp = ChatResponse(sender="you", message=question, type="stream")
                 await websocket.send_json(resp.dict())
@@ -299,7 +301,9 @@ async def pre_trained_chat(
 async def lead_form_chat_endpoint_v2(
         websocket: WebSocket,
         form_id,
-        aii_admin_api: AiiAdminApi = Depends(http_dependencies.get_aii_admin_api)
+        session_id: str = Query(None, description="Optional session ID for update filling"),
+        filling_id: str = Query(None, description="Optional filling ID for update filling"),
+        aii_admin_api: AiiAdminApi = Depends(http_dependencies.get_aii_admin_api),
 ):
     await websocket.accept()
     conn_id = str(uuid.uuid4())
@@ -339,14 +343,15 @@ async def lead_form_chat_endpoint_v2(
                     raise WebSocketDisconnect
 
             # check credits
-            is_possible_to_spend_credits = await aii_admin_api.is_possible_to_spend_credits(owner['id'], action=ActionForCredits.AI_REPLY_LEAD_FORM.value)
-            if not is_possible_to_spend_credits:
-                logger.warning("connect#%s user#%s month limit credits exceed ws disconnect", conn_id, owner['id'])
-                resp = ChatResponse(sender="bot",
-                                    message=f"Month limit credits {chat_messages_per_month_limit} exceeded",
-                                    type="tariff_limit_exceeded")
-                await websocket.send_json(resp.dict())
-                raise WebSocketDisconnect
+            if not is_disable_credit_mode_enabled(user_input):
+                is_possible_to_spend_credits = await aii_admin_api.is_possible_to_spend_credits(owner['id'], action=ActionForCredits.AI_REPLY_LEAD_FORM.value)
+                if not is_possible_to_spend_credits:
+                    logger.warning("connect#%s user#%s month limit credits exceed ws disconnect", conn_id, owner['id'])
+                    resp = ChatResponse(sender="bot",
+                                        message=f"Month limit credits {chat_messages_per_month_limit} exceeded",
+                                        type="tariff_limit_exceeded")
+                    await websocket.send_json(resp.dict())
+                    raise WebSocketDisconnect
 
             # Call GPT-3.5 API
             openai.api_key = api_key
@@ -362,8 +367,9 @@ async def lead_form_chat_endpoint_v2(
             )
 
             # Extract the text from the response
+            openai_resp = ''
+            is_email_ai_answer_delimiter_sent = False
             try:
-                openai_resp = ''
                 start_resp = LeadFormChatResponse(sender="bot", message="", type="start")
                 await websocket.send_json(start_resp.dict())
                 async for response_chunk in response:
@@ -371,6 +377,19 @@ async def lead_form_chat_endpoint_v2(
                     content = getattr(delta, "content", None)
                     if content:
                         openai_resp += content
+
+                        if is_email_ai_answer(lead_form) and len(openai_resp) > config.email_ai_answer_non_obfuscate_symbols:
+                            if not is_email_ai_answer_delimiter_sent:
+                                chat_resp = LeadFormChatResponse(
+                                    sender="bot",
+                                    message="email_ai_answer_delimiter",
+                                    type="info",
+                                )
+                                await websocket.send_json(chat_resp.dict())
+                                is_email_ai_answer_delimiter_sent = True
+
+                            content = shuffle_string(content)
+
                         chat_resp = LeadFormChatResponse(
                             sender="bot",
                             message=content,
@@ -383,8 +402,13 @@ async def lead_form_chat_endpoint_v2(
             finally:
                 # increment user chat_messages_count per month
                 incr_result = await aii_admin_api.increment_user_actions_count_per_month(owner['id'])
-                await aii_admin_api.spend_credits(user_id=owner['id'], action=ActionForCredits.AI_REPLY_LEAD_FORM.value)
                 logger.info(incr_result)
+                if not is_disable_credit_mode_enabled(user_input):
+                    await aii_admin_api.spend_credits(user_id=owner['id'], action=ActionForCredits.AI_REPLY_LEAD_FORM.value)
+
+                if session_id and filling_id and is_email_ai_answer(lead_form):
+                    logger.debug('connect#%s is_email_ai_answer and session_id and filling_id exist, try to update filling', conn_id)
+                    await aii_admin_api.update_filling(form_id=form_id, session_id=session_id, filling_id=filling_id, ai_response=openai_resp)
 
     except (ConnectionClosedError, WebSocketDisconnect):
         await websocket.close()
