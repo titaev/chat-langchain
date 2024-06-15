@@ -37,6 +37,6 @@ class LeadFormChatResponse(BaseModel):
 
     @validator("type")
     def validate_message_type(cls, v):
-        if v not in ["start", "stream", "end", "error", "info"]:
+        if v not in ["start", "stream", "end", "error", "info", "stream-obfuscated"]:
             raise ValueError("type must be start, stream or end")
         return v

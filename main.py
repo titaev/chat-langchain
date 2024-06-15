@@ -301,8 +301,6 @@ async def pre_trained_chat(
 async def lead_form_chat_endpoint_v2(
         websocket: WebSocket,
         form_id,
-        session_id: str = Query(None, description="Optional session ID for update filling"),
-        filling_id: str = Query(None, description="Optional filling ID for update filling"),
         aii_admin_api: AiiAdminApi = Depends(http_dependencies.get_aii_admin_api),
 ):
     await websocket.accept()
@@ -328,7 +326,13 @@ async def lead_form_chat_endpoint_v2(
 
         while True:
             data = await websocket.receive_text()
-            user_input = json.loads(data)["text"]
+            user_data = json.loads(data)
+            user_input = user_data["text"]
+            if is_email_ai_answer(lead_form):
+                user_input += '\n Respond with no formatting and no markdown!!!!'
+            session_id = user_data.get('session_id')
+            filling_id = user_data.get('filling_id')
+
             logger.info('connect#%s user input: "%s"', conn_id, user_input)
 
             # check limits
@@ -368,7 +372,6 @@ async def lead_form_chat_endpoint_v2(
 
             # Extract the text from the response
             openai_resp = ''
-            is_email_ai_answer_delimiter_sent = False
             try:
                 start_resp = LeadFormChatResponse(sender="bot", message="", type="start")
                 await websocket.send_json(start_resp.dict())
@@ -379,22 +382,17 @@ async def lead_form_chat_endpoint_v2(
                         openai_resp += content
 
                         if is_email_ai_answer(lead_form) and len(openai_resp) > config.email_ai_answer_non_obfuscate_symbols:
-                            if not is_email_ai_answer_delimiter_sent:
-                                chat_resp = LeadFormChatResponse(
-                                    sender="bot",
-                                    message="email_ai_answer_delimiter",
-                                    type="info",
-                                )
-                                await websocket.send_json(chat_resp.dict())
-                                is_email_ai_answer_delimiter_sent = True
-
-                            content = shuffle_string(content)
-
-                        chat_resp = LeadFormChatResponse(
-                            sender="bot",
-                            message=content,
-                            type="stream",
-                        )
+                            chat_resp = LeadFormChatResponse(
+                                sender="bot",
+                                message=shuffle_string(content),
+                                type="stream-obfuscated",
+                            )
+                        else:
+                            chat_resp = LeadFormChatResponse(
+                                sender="bot",
+                                message=content,
+                                type="stream",
+                            )
                         await websocket.send_json(chat_resp.dict())
                 logger.debug('connect#%s openai response: "%s"', conn_id, openai_resp)
                 end_resp = LeadFormChatResponse(sender="bot", message="", type="end")
